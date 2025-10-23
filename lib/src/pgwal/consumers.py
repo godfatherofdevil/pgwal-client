@@ -1,0 +1,1 @@
+"""Postgres WAL consumers module"""
