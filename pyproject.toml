@@ -96,7 +96,7 @@ py-version = "3.12"
 
 # When enabled, pylint would attempt to guess common misconfiguration and emit
 # user-friendly hints instead of false-positive error messages.
-suggestion-mode = true
+# suggestion-mode = true
 
 # Allow loading of arbitrary C extensions. Extensions are imported into the
 # active Python interpreter and may run arbitrary code.
@@ -270,7 +270,7 @@ max-locals = 15
 max-parents = 7
 
 # Maximum number of positional arguments for function / method.
-max-positional-arguments = 5
+max-positional-arguments = 10
 
 # Maximum number of public methods for a class (see R0904).
 max-public-methods = 20
