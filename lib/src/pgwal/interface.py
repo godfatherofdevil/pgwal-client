@@ -1,21 +1,17 @@
 """Internal interface models module"""
 # pylint: disable=C0103
 from enum import StrEnum
-from typing import Optional
-from pydantic import (
-    BaseModel,
-    Field,
-)
+from pydantic import BaseModel, Field
 
 
 class DecodingParamsActions(StrEnum):
     """Possible values to wal2json decoding parameter actions"""
 
-    create = 'create'
+    insert = 'insert'
     update = 'update'
     delete = 'delete'
     truncate = 'truncate'
-    all = 'create, update, delete, truncate'
+    all = 'insert, update, delete, truncate'
 
 
 class DecodingParamsValues(StrEnum):
@@ -35,101 +31,96 @@ class Wal2JsonDecodingParams(BaseModel):
     https://github.com/eulerto/wal2json/tree/wal2json_2_6?tab=readme-ov-file#parameters
     """
 
-    include_xids: Optional[DecodingParamsValues] = Field(
+    include_xids: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-xids',
+        serialization_alias='include-xids',
     )
-    include_timestamp: Optional[DecodingParamsValues] = Field(
+    include_timestamp: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-timestamp',
+        serialization_alias='include-timestamp',
     )
-    include_schemas: Optional[DecodingParamsValues] = Field(
+    include_schemas: DecodingParamsValues | None = Field(
         DecodingParamsValues.true,
-        alias='include-schemas',
+        serialization_alias='include-schemas',
     )
-    include_types: Optional[DecodingParamsValues] = Field(
+    include_types: DecodingParamsValues | None = Field(
         DecodingParamsValues.true,
-        alias='include-types',
+        serialization_alias='include-types',
     )
-    include_typmod: Optional[DecodingParamsValues] = Field(
+    include_typmod: DecodingParamsValues | None = Field(
         DecodingParamsValues.true,
-        alias='include-typmod',
+        serialization_alias='include-typmod',
     )
-    include_type_oids: Optional[DecodingParamsValues] = Field(
+    include_type_oids: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-type-oids',
+        serialization_alias='include-type-oids',
     )
-    include_domain_data_type: Optional[DecodingParamsValues] = Field(
+    include_domain_data_type: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-domain-data-type',
+        serialization_alias='include-domain-data-type',
     )
-    include_column_positions: Optional[DecodingParamsValues] = Field(
+    include_column_positions: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-column-positions',
+        serialization_alias='include-column-positions',
     )
-    include_origin: Optional[DecodingParamsValues] = Field(
+    include_origin: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-origin',
+        serialization_alias='include-origin',
     )
-    include_not_null: Optional[DecodingParamsValues] = Field(
+    include_not_null: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-not-null',
+        serialization_alias='include-not-null',
     )
-    include_default: Optional[DecodingParamsValues] = Field(
+    include_default: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-default',
+        serialization_alias='include-default',
     )
-    include_pk: Optional[DecodingParamsValues] = Field(
+    include_pk: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-pk',
+        serialization_alias='include-pk',
     )
-    numeric_data_types_as_string: Optional[DecodingParamsValues] = Field(
+    numeric_data_types_as_string: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='numeric-data-types-as-string',
+        serialization_alias='numeric-data-types-as-string',
     )
-    pretty_print: Optional[DecodingParamsValues] = Field(
+    pretty_print: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='pretty-print',
+        serialization_alias='pretty-print',
     )
-    write_in_chunks: Optional[DecodingParamsValues] = Field(
+    write_in_chunks: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='write-in-chunks',
+        serialization_alias='write-in-chunks',
     )
-    include_lsn: Optional[DecodingParamsValues] = Field(
+    include_lsn: DecodingParamsValues | None = Field(
         DecodingParamsValues.false,
-        alias='include-lsn',
+        serialization_alias='include-lsn',
     )
-    include_transaction: Optional[DecodingParamsValues] = Field(
+    include_transaction: DecodingParamsValues | None = Field(
         DecodingParamsValues.true,
-        alias='include-transaction',
+        serialization_alias='include-transaction',
     )
-    # `include-unchanged-toast` (deprecated): Don't use it. It is deprecated.
-    include_unchanged_toast: Optional[DecodingParamsValues] = Field(
-        DecodingParamsValues.false,
-        alias='include-unchanged-toast',
-    )
-    filter_origins: Optional[DecodingParamsValues] = Field(
+    filter_origins: DecodingParamsValues | None = Field(
         DecodingParamsValues.empty,
-        alias='filter-origins',
+        serialization_alias='filter-origins',
     )
-    filter_tables: Optional[DecodingParamsValues] = Field(
+    filter_tables: DecodingParamsValues | None = Field(
         DecodingParamsValues.empty,
-        alias='filter-tables',
+        serialization_alias='filter-tables',
     )
-    add_tables: Optional[DecodingParamsValues] = Field(
+    add_tables: DecodingParamsValues | None = Field(
         DecodingParamsValues.empty,
-        alias='add-tables',
+        serialization_alias='add-tables',
     )
-    filter_msg_prefixes: Optional[DecodingParamsValues] = Field(
+    filter_msg_prefixes: DecodingParamsValues | None = Field(
         DecodingParamsValues.empty,
-        alias='filter-msg-prefixes',
+        serialization_alias='filter-msg-prefixes',
     )
-    add_msg_prefixes: Optional[DecodingParamsValues] = Field(
+    add_msg_prefixes: DecodingParamsValues | None = Field(
         DecodingParamsValues.empty,
-        alias='add-msg-prefixes',
+        serialization_alias='add-msg-prefixes',
     )
-    format_version: Optional[DecodingParamsValues] = Field(
+    format_version: DecodingParamsValues | None = Field(
         DecodingParamsValues.true,
-        alias='format-version',
+        serialization_alias='format-version',
     )
-    actions: Optional[str] = Field(DecodingParamsActions.all)
+    actions: str | None = Field(DecodingParamsActions.all)

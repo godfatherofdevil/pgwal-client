@@ -1,6 +1,5 @@
 """Replication Message Publishers module"""
 import abc
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -24,7 +23,7 @@ class ShellPublisher(BasePublisher):
     def publish(self, msg: 'ReplicationMessage'):
         logger.info(
             'payload %s, send_time %s',
-            json.dumps(msg.payload),
+            msg.payload,
             msg.send_time,
         )
 
