@@ -76,7 +76,7 @@ class WALConsumer(Callable, metaclass=abc.ABCMeta):
         msg.cursor.send_feedback(flush_lsn=msg.data_start)
 
     def __enter__(self):
-        self.stop_replication()
+        self.start_replication()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
