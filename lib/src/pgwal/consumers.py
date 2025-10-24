@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         LogicalReplicationConnection,
         ReplicationMessage,
     )
+    from .publishers import BasePublisher
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class WALConsumer(Callable, metaclass=abc.ABCMeta):
         conn: 'LogicalReplicationConnection',
         replication_slot: str,
         replication_opts: Wal2JsonDecodingParams,
-        publishers: List = None,
+        publishers: List['BasePublisher'] = None,
         create_repl_slot: bool = False,
         del_repl_slot: bool = False,
     ):
