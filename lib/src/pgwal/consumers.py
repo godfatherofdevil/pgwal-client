@@ -36,6 +36,11 @@ class WALConsumer(Callable, metaclass=abc.ABCMeta):
         self.del_repl_slot = del_repl_slot
         self.publishers = publishers or []
 
+    @property
+    def output_plugin(self):
+        """Output plugin to decode WAL stream."""
+        return 'wal2json'
+
     def start_replication(self):
         """Start replication stream"""
         try:
@@ -54,7 +59,8 @@ class WALConsumer(Callable, metaclass=abc.ABCMeta):
                 )
                 raise
             self.cursor.create_replication_slot(
-                self.replication_slot, output_plugin="wal2json"
+                self.replication_slot,
+                output_plugin=self.output_plugin,
             )
             self.cursor.start_replication(
                 slot_name=self.replication_slot,
