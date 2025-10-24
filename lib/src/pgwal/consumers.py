@@ -85,17 +85,5 @@ class WALConsumer(Callable, metaclass=abc.ABCMeta):
         self.start_replication()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        if exc_type is not None:
-            logger.error(
-                'Unexpected Error while consuming from WAL stream. replication_slot %s',
-                self.replication_slot,
-                exc_info=(
-                    exc_type,
-                    exc_val,
-                    exc_tb,
-                ),
-            )
-            return False
+    def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop_replication()
-        return True
