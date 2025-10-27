@@ -27,12 +27,12 @@ class WALReplicationValues(StrEnum):
     truncate = 'truncate'
 
 
-_WALReplicationActions = (
+_WALReplicationActions = [
     WALReplicationValues.insert,
     WALReplicationValues.update,
     WALReplicationValues.delete,
     WALReplicationValues.truncate,
-)
+]
 
 
 class WALReplicationOpts(BaseModel):
@@ -145,4 +145,4 @@ class WALReplicationOpts(BaseModel):
             raise InvalidReplicationAction(
                 f'Possible replication actions {_WALReplicationActions}, got {value}'
             )
-        return ', '.join(action.value for action in value)
+        return ', '.join([action.value for action in value])
