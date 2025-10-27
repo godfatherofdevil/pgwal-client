@@ -145,4 +145,4 @@ class WALReplicationOpts(BaseModel):
             raise InvalidReplicationAction(
                 f'Possible replication actions {_WALReplicationActions}, got {value}'
             )
-        return ', '.join([action.value for action in value])
+        return ', '.join(value)
