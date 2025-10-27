@@ -1,7 +1,7 @@
 """Internal interface models module"""
 # pylint: disable=C0103
 from enum import StrEnum
-from typing import List
+from typing import List, Union
 
 from pydantic import (
     BaseModel,
@@ -27,7 +27,7 @@ class WALReplicationValues(StrEnum):
     truncate = 'truncate'
 
 
-WALReplicationActions = (
+_WALReplicationActions = (
     WALReplicationValues.insert,
     WALReplicationValues.update,
     WALReplicationValues.delete,
@@ -144,10 +144,12 @@ class WALReplicationOpts(BaseModel):
 
     @field_validator('actions')
     @classmethod
-    def validate_actions(cls, value: List) -> str:
+    def validate_actions(cls, value: Union[List[WALReplicationValues], str]) -> str:
         """Validate and build the string format for the actions"""
-        if not all((action in WALReplicationActions for action in value)):
+        if isinstance(value, str):
+            value = value.split(',')
+        if not all((action in _WALReplicationActions for action in value)):
             raise InvalidReplicationAction(
-                f'Possible replication actions {WALReplicationActions}, got {value}'
+                f'Possible replication actions {_WALReplicationActions}, got {value}'
             )
         return ', '.join(action.value for action in value)
