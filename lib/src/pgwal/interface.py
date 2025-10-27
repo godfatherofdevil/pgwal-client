@@ -3,16 +3,12 @@
 from enum import StrEnum
 from typing import List
 
-from pydantic import BaseModel, Field, field_validator
-
-
-class WALReplicationActions(StrEnum):
-    """Possible values to replication option parameter actions"""
-
-    insert = 'insert'
-    update = 'update'
-    delete = 'delete'
-    truncate = 'truncate'
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+)
+from .errors import InvalidReplicationAction
 
 
 class WALReplicationValues(StrEnum):
@@ -24,6 +20,19 @@ class WALReplicationValues(StrEnum):
     false = '0'
     true = '1'
     empty = ''
+    # actions
+    insert = 'insert'
+    update = 'update'
+    delete = 'delete'
+    truncate = 'truncate'
+
+
+WALReplicationActions = (
+    WALReplicationValues.insert,
+    WALReplicationValues.update,
+    WALReplicationValues.delete,
+    WALReplicationValues.truncate,
+)
 
 
 class WALReplicationOpts(BaseModel):
@@ -124,16 +133,21 @@ class WALReplicationOpts(BaseModel):
         WALReplicationValues.true,
         serialization_alias='format-version',
     )
-    actions: List[WALReplicationActions] | [
-        WALReplicationActions.insert,
-        WALReplicationActions.update,
-        WALReplicationActions.delete,
-        WALReplicationActions.truncate,
-    ]
+    actions: List[WALReplicationValues] | str = Field(
+        [
+            WALReplicationValues.insert,
+            WALReplicationValues.update,
+            WALReplicationValues.delete,
+            WALReplicationValues.truncate,
+        ]
+    )
 
     @field_validator('actions')
     @classmethod
     def validate_actions(cls, value: List) -> str:
         """Validate and build the string format for the actions"""
-        obj = super().model_validate(value)
-        return ', '.join(action.value for action in obj.actions)
+        if not all((action in WALReplicationActions for action in value)):
+            raise InvalidReplicationAction(
+                f'Possible replication actions {WALReplicationActions}, got {value}'
+            )
+        return ', '.join(action.value for action in value)

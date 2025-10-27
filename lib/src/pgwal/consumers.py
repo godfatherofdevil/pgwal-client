@@ -2,7 +2,7 @@
 from collections.abc import Callable
 import logging
 from typing import List, TYPE_CHECKING
-from .interface import Wal2JsonDecodingParams
+from .interface import WALReplicationOpts
 
 if TYPE_CHECKING:
     from psycopg2.extras import (
@@ -22,7 +22,7 @@ class WALConsumer(Callable):
         self,
         cursor: 'ReplicationCursor',
         replication_slot: str,
-        replication_opts: Wal2JsonDecodingParams,
+        replication_opts: WALReplicationOpts,
         publishers: List['BasePublisher'] = None,
     ):
         self.cursor = cursor
