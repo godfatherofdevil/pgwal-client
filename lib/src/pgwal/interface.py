@@ -133,14 +133,7 @@ class WALReplicationOpts(BaseModel):
         WALReplicationValues.true,
         serialization_alias='format-version',
     )
-    actions: List[WALReplicationValues] | str = Field(
-        [
-            WALReplicationValues.insert,
-            WALReplicationValues.update,
-            WALReplicationValues.delete,
-            WALReplicationValues.truncate,
-        ]
-    )
+    actions: List[WALReplicationValues] | str = Field(_WALReplicationActions)
 
     @field_validator('actions')
     @classmethod
