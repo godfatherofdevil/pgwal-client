@@ -140,7 +140,7 @@ class WALReplicationOpts(BaseModel):
     def validate_actions(cls, value: Union[List[WALReplicationValues], str]) -> str:
         """Validate and build the string format for the actions"""
         if isinstance(value, str):
-            value = value.split(',')
+            value = [WALReplicationValues(v.strip()) for v in value.strip().split(',')]
         if not all((action in _WALReplicationActions for action in value)):
             raise InvalidReplicationAction(
                 f'Possible replication actions {_WALReplicationActions}, got {value}'
