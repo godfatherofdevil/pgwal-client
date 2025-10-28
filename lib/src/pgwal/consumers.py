@@ -1,6 +1,8 @@
 """Postgres WAL consumers module"""
 from collections.abc import Callable
+from datetime import datetime
 import logging
+from select import select
 from typing import List, TYPE_CHECKING
 from .interface import WALReplicationOpts
 
@@ -18,14 +20,14 @@ logger = logging.getLogger(__name__)
 class WALConsumer(Callable):
     """Base WAL Stream consumer or subscriber."""
 
+    _STATUS_INTERVAL = 10.0
+
     def __init__(
         self,
-        cursor: 'ReplicationCursor',
         replication_slot: str,
         replication_opts: WALReplicationOpts,
         publishers: List['BasePublisher'] = None,
     ):
-        self.cursor = cursor
         self.replication_slot = replication_slot
         self.replication_opts = replication_opts
         self.publishers = publishers or []
@@ -35,10 +37,14 @@ class WALConsumer(Callable):
         """Output plugin to decode WAL stream."""
         return 'wal2json'
 
-    def start_replication(self):
+    def start_replication(self, cursor: 'ReplicationCursor'):
         """Start replication stream"""
-        logger.debug('Starting the replication slot %s', self.replication_slot)
-        self.cursor.start_replication(
+        logger.debug(
+            'Consumer %s, Starting the replication slot %s',
+            id(self),
+            self.replication_slot,
+        )
+        cursor.start_replication(
             slot_name=self.replication_slot,
             decode=True,
             options=self.replication_opts.model_dump(
@@ -48,8 +54,41 @@ class WALConsumer(Callable):
             ),
         )
 
-    def __call__(self, msg: 'ReplicationMessage'):
-        """consume WAL stream and publish using provided publishers"""
+    def _consume(self, msg: 'ReplicationMessage'):
+        """Consume one message and publish to all configured publishers"""
         for publisher in self.publishers:
             publisher.publish(msg)
         msg.cursor.send_feedback(flush_lsn=msg.data_start)
+
+    def consume_async(self, cursor: 'ReplicationCursor'):
+        """Consume WAL stream without blocking"""
+        self.start_replication(cursor)
+        while True:
+            if cursor.closed:
+                logger.warning('Cursor is already closed. returning!!!')
+                return
+            msg = cursor.read_message()
+            if msg:
+                self._consume(msg)
+            else:
+                timeout = (
+                    self._STATUS_INTERVAL
+                    - (datetime.now() - cursor.feedback_timestamp).total_seconds()
+                )
+                try:
+                    # pylint: disable=W0612
+                    # flake8: noqa
+                    sel = select([cursor], [], [], max(0, int(timeout)))
+                except InterruptedError:
+                    pass  # recalculate timeout and continue
+
+    def consume_sync(self, cursor: 'ReplicationCursor'):
+        """Consume WAL stream and block till new messages arrive"""
+        cursor.consume_stream(self)
+
+    def __call__(self, msg: 'ReplicationMessage'):
+        """
+        callback to ReplicationCursor.consume_stream,
+        for more details https://www.psycopg.org/docs/extras.html#psycopg2.extras.ReplicationCursor.consume_stream
+        """
+        self._consume(msg)
