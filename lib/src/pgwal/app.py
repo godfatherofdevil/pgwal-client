@@ -1,4 +1,5 @@
 """PGWAL Client"""
+import time
 from functools import cached_property
 import logging
 import threading
@@ -9,6 +10,7 @@ from psycopg2.extras import LogicalReplicationConnection
 
 if TYPE_CHECKING:
     from .consumers import WALConsumer
+    from .publishers import BasePublisher
 
 
 POOL_MIN = 1
@@ -27,6 +29,8 @@ class PGWAL:
         self.dsn = dsn
         self._pool = None
         self.tasks: List[threading.Thread] = []
+        # We maintain a list of publishers so that we can gracefully exit
+        self.publishers: List['BasePublisher'] = []
 
     @cached_property
     def pool(self) -> ThreadedConnectionPool:
@@ -45,6 +49,11 @@ class PGWAL:
         if self._pool is not None and not self._pool.closed:
             self._pool.closeall()
 
+    def stop_publishers(self):
+        """Stop all publishers before exiting"""
+        for publisher in self.publishers:
+            publisher.stop()
+
     def get_conn(self) -> 'LogicalReplicationConnection':
         """Get a connection from pool"""
         return self.pool.getconn()
@@ -57,9 +66,19 @@ class PGWAL:
             consumer.consume_async(cursor)
 
     def consume(self, consumer: 'WALConsumer') -> threading.Thread:
-        """Consume a WAL stream in a background thread"""
+        """
+        Consume a WAL stream in a background thread.
+        While This can support multiple consumer instances,
+        it is not recommended to run more than one consumer instance in production b/c of following limitations
+        1. WAL replication needs a dedicated db connection and that connection
+        can't be shared with multiple consumer instance
+        2. PGWAL supports a max of 5 database connection pool and using more than 5 consumers will lead
+        to some connections being shared, this will not lead to an error but postgres will silently drop new
+        start_replication commands over a connection that has already issued a start_replication.
+        """
         task = threading.Thread(target=self._consume, args=(consumer,))
         self.tasks.append(task)
+        self.publishers.extend(consumer.publishers)
 
         return task
 
@@ -67,16 +86,23 @@ class PGWAL:
         """Run and wait for all the tasks. This is a blocking call."""
         EXIT.set()
 
-        def _wait():
-            """wait for all tasks"""
+        def _start():
+            """start all tasks"""
             for task in self.tasks:
                 task.start()
+
+        def _wait():
+            """Wait for all threads"""
             for task in self.tasks:
                 task.join()
 
         try:
-            _wait()
-        finally:
+            _start()
+        except (KeyboardInterrupt, Exception):
             logger.info('Signalling all threads to close before shutting down...BYE')
             EXIT.clear()
+            _wait()
             self.close_pool()
+            self.stop_publishers()
+        finally:
+            time.sleep(1.0)
