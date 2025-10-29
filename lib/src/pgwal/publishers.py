@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 import pika
 from pika.exchange_type import ExchangeType
 
+from lib.src.pgwal.events import EXIT
+
 if TYPE_CHECKING:
     from psycopg2.extras import ReplicationMessage
 logger = logging.getLogger(__name__)
@@ -228,8 +230,8 @@ class RabbitPublisher(BasePublisher):
         """
         logger.warning('Channel %i was closed: %s', channel, reason)
         self._channel = None
-        if not self._stopping:
-            self._connection.close()
+        if not self._stopping or not EXIT.is_set():
+            self.close_connection()
 
     def setup_exchange(self, exchange_name):
         """Setup the exchange on RabbitMQ by invoking the Exchange.Declare RPC
@@ -411,6 +413,12 @@ class RabbitPublisher(BasePublisher):
         """Run the publisher by connecting and then starting the IOLoop."""
         self.set_running(True)
         while not self._stopping:
+            # This is just an insurance to break from the ioloop when we need to exit
+            if not EXIT.is_set():
+                logger.warning(
+                    'Received EXIT event, breaking from the RabbitMQ connection loop.'
+                )
+                break
             self._connection = None
             self._deliveries = {}
             self._acked = 0
@@ -442,14 +450,20 @@ class RabbitPublisher(BasePublisher):
 
         """
         if self._channel is not None and self._channel.is_open:
-            logger.info('Closing the channel')
-            self._channel.close()
+            if self._channel.is_closing:
+                logger.warning('Channel is already closing.')
+            else:
+                logger.info('Closing the channel')
+                self._channel.close()
 
     def close_connection(self):
         """This method closes the connection to RabbitMQ."""
-        if self._connection is not None and self._channel.is_open:
-            logger.info('Closing connection')
-            self._connection.close()
+        if self._connection is not None and self._connection.is_open:
+            if self._connection.is_closing:
+                logger.warning('Connection is already closing.')
+            else:
+                logger.info('Closing connection')
+                self._connection.close()
 
     @ensure_running
     def publish(self, msg: 'ReplicationMessage'):

@@ -4,6 +4,8 @@ from datetime import datetime
 import logging
 from select import select
 from typing import List, TYPE_CHECKING
+
+from .events import EXIT
 from .interface import WALReplicationOpts
 
 if TYPE_CHECKING:
@@ -64,6 +66,9 @@ class WALConsumer(Callable):
         """Consume WAL stream without blocking"""
         self.start_replication(cursor)
         while True:
+            if not EXIT.is_set():
+                logger.warning('Received EXIT event. breaking from the consuming loop')
+                break
             if cursor.closed:
                 logger.warning('Cursor is already closed. returning!!!')
                 return

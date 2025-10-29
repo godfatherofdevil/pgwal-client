@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, List
 
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import LogicalReplicationConnection
+from .events import EXIT
 
 if TYPE_CHECKING:
     from .consumers import WALConsumer
@@ -15,7 +16,6 @@ if TYPE_CHECKING:
 
 POOL_MIN = 1
 POOL_MAX = 5
-EXIT = threading.Event()
 logger = logging.getLogger(__name__)
 
 
