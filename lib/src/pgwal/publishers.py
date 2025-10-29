@@ -378,17 +378,10 @@ class RabbitPublisher(BasePublisher):
         self._connection.ioloop.call_later(self._PUBLISH_INTERVAL, self.publish_message)
 
     def publish_message(self):
-        """If the class is not stopping, publish a message to RabbitMQ,
-        appending a list of deliveries with the message number that was sent.
-        This list will be used to check for delivery confirmations in the
-        on_delivery_confirmations method.
-
-        Once the message has been sent, schedule another message to be sent.
-        The main reason I put scheduling in was just so you can get a good idea
-        of how the process is flowing by slowing down and speeding up the
-        delivery intervals by changing the PUBLISH_INTERVAL constant in the
-        class.
-
+        """
+        read a message from internal SimpleQueue and if there is message then deliver it to RabbitMQ.
+        If there is no message in the queue, look for a message again in _PUBLISH_INTERVAL seconds.
+        This ensures that we are always looking for a message in the internal queue as long as the connection is open
         """
         if self._channel is None or not self._channel.is_open:
             return
@@ -415,7 +408,7 @@ class RabbitPublisher(BasePublisher):
         self.schedule_next_message()
 
     def run(self):
-        """Run the example code by connecting and then starting the IOLoop."""
+        """Run the publisher by connecting and then starting the IOLoop."""
         self.set_running(True)
         while not self._stopping:
             self._connection = None
@@ -423,14 +416,8 @@ class RabbitPublisher(BasePublisher):
             self._acked = 0
             self._nacked = 0
             self._message_number = 0
-
-            try:
-                self._connection = self.connect()
-                self._connection.ioloop.start()
-            finally:
-                self.stop()
-                if self._connection is not None and not self._connection.is_closed:
-                    self._connection.ioloop.start()
+            self._connection = self.connect()
+            self._connection.ioloop.start()
 
         logger.info('Stopped')
 

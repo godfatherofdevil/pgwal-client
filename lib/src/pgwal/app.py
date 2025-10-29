@@ -87,21 +87,21 @@ class PGWAL:
         EXIT.set()
 
         def _start():
-            """start all tasks"""
+            """Start all the tasks"""
             for task in self.tasks:
                 task.start()
 
         def _wait():
-            """Wait for all threads"""
+            """Wait for all tasks"""
             for task in self.tasks:
                 task.join()
 
         try:
             _start()
+            _wait()
         except (KeyboardInterrupt, Exception):
             logger.info('Signalling all threads to close before shutting down...BYE')
             EXIT.clear()
-            _wait()
             self.close_pool()
             self.stop_publishers()
         finally:
