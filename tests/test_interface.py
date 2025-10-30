@@ -77,3 +77,23 @@ def test_format_version_expected(format_version, expected):
 def test_format_version_not_expected(format_version):
     with pytest.raises(ValidationError):
         WALReplicationOpts(format_version=format_version)
+
+
+@pytest.mark.parametrize(
+    'list_str, expected',
+    ((WALReplicationValues.nil, ''), (['val1', 'val2', 'val3'], 'val1, val2, val3')),
+)
+def test_list_str_expected(list_str, expected):
+    repl_opts = WALReplicationOpts(
+        filter_origins=list_str,
+        filter_tables=list_str,
+        add_tables=list_str,
+        filter_msg_prefixes=list_str,
+        add_msg_prefixes=list_str,
+    )
+
+    assert repl_opts.filter_origins == expected
+    assert repl_opts.filter_tables == expected
+    assert repl_opts.add_tables == expected
+    assert repl_opts.filter_msg_prefixes == expected
+    assert repl_opts.add_msg_prefixes == expected
