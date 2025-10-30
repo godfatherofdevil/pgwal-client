@@ -81,7 +81,10 @@ def test_format_version_not_expected(format_version):
 
 @pytest.mark.parametrize(
     'list_str, expected',
-    ((WALReplicationValues.nil, ''), (['val1', 'val2', 'val3'], 'val1, val2, val3')),
+    (
+        (WALReplicationValues.nil, ''),
+        (['val1', 'val2', 'val3'], 'val1, val2, val3'),
+    ),
 )
 def test_list_str_expected(list_str, expected):
     repl_opts = WALReplicationOpts(
