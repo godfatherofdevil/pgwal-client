@@ -50,3 +50,30 @@ def test_repl_opts_actions_validates_list():
 def test_repl_opts_actions_validates_str():
     with pytest.raises(ValidationError):
         WALReplicationOpts(actions='insert, update, invalid')
+
+
+@pytest.mark.parametrize(
+    'format_version, expected',
+    ((WALReplicationValues.one, '1'), (WALReplicationValues.two, '2')),
+)
+def test_format_version_expected(format_version, expected):
+    repl_opts = WALReplicationOpts(format_version=format_version)
+    repl_opts_ = repl_opts.model_dump(by_alias=True)
+
+    assert repl_opts_['format-version'] == expected
+
+
+@pytest.mark.parametrize(
+    'format_version',
+    (
+        WALReplicationValues.zero,
+        WALReplicationValues.nil,
+        WALReplicationValues.insert,
+        WALReplicationValues.update,
+        WALReplicationValues.delete,
+        WALReplicationValues.truncate,
+    ),
+)
+def test_format_version_not_expected(format_version):
+    with pytest.raises(ValidationError):
+        WALReplicationOpts(format_version=format_version)
