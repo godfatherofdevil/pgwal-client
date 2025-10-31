@@ -13,11 +13,11 @@ def create_test_data(conn):
         cursor.close()
 
 
-def test_msg_n_consume_returns_if_no_msg(wal_consumer, db_replication_cursor):
+def test__msg_n_consume_returns_if_no_msg(wal_consumer, db_replication_cursor):
     assert not wal_consumer._msg_n_consumed(db_replication_cursor)
 
 
-def test_msg_n_consume_consumes_if_msg(wal_consumer, db_replication_cursor, db_conn):
+def test__msg_n_consume_consumes_if_msg(wal_consumer, db_replication_cursor, db_conn):
     def _wait_while_msg():
         """Simulating replication."""
         while 1:
