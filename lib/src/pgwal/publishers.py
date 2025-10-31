@@ -6,7 +6,7 @@ import json
 import logging
 from queue import SimpleQueue, Empty
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import pika
 from pika.exchange_type import ExchangeType
@@ -379,6 +379,16 @@ class RabbitPublisher(BasePublisher):
         logger.info('Scheduling next message for %0.1f seconds', self._PUBLISH_INTERVAL)
         self._connection.ioloop.call_later(self._PUBLISH_INTERVAL, self.publish_message)
 
+    def _get_message(self) -> Optional[str | bytes]:
+        """Get message if any from internal msg queue"""
+        try:
+            message = self._MSG_QUEUE.get_nowait()
+        except Empty:
+            return None
+        if not isinstance(message, (bytes, str)):
+            message = json.dumps(message, ensure_ascii=False)
+        return message
+
     def publish_message(self):
         """
         read a message from internal SimpleQueue and if there is message then deliver it to RabbitMQ.
@@ -391,15 +401,12 @@ class RabbitPublisher(BasePublisher):
         properties = pika.BasicProperties(
             app_id=self._NAME, content_type='application/json', headers=self.msg_headers
         )
-        try:
-            message = self._MSG_QUEUE.get_nowait()
-        except Empty:
-            message = None
+        message = self._get_message()
         if message:
             self._channel.basic_publish(
                 self._exchange,
                 self._routing_key,
-                json.dumps(message, ensure_ascii=False),
+                message,
                 properties,
             )
             self._message_number += 1

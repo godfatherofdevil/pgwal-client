@@ -62,6 +62,31 @@ class WALConsumer(Callable):
             publisher.publish(msg)
         msg.cursor.send_feedback(flush_lsn=msg.data_start)
 
+    def _msg_n_consumed(self, cursor: 'ReplicationCursor') -> bool:
+        """
+        Consume if message otherwise return
+        :param cursor: replication cursor
+        :return bool: True if there is a message to consume otherwise False
+        """
+        msg = cursor.read_message()
+        if not msg:
+            return False
+        self._consume(msg)
+        return True
+
+    def _select_or_timeout(self, cursor: 'ReplicationCursor'):
+        """Wait on cursor for a message or timeout and recalculate timeout and continue"""
+        timeout = (
+            self._STATUS_INTERVAL
+            - (datetime.now() - cursor.feedback_timestamp).total_seconds()
+        )
+        try:
+            # pylint: disable=W0612
+            # flake8: noqa
+            sel = select([cursor], [], [], max(0, int(timeout)))
+        except InterruptedError:
+            pass  # recalculate timeout and continue
+
     def consume_async(self, cursor: 'ReplicationCursor'):
         """Consume WAL stream without blocking"""
         self.start_replication(cursor)
@@ -72,20 +97,9 @@ class WALConsumer(Callable):
             if cursor.closed:
                 logger.warning('Cursor is already closed. returning!!!')
                 return
-            msg = cursor.read_message()
-            if msg:
-                self._consume(msg)
-            else:
-                timeout = (
-                    self._STATUS_INTERVAL
-                    - (datetime.now() - cursor.feedback_timestamp).total_seconds()
-                )
-                try:
-                    # pylint: disable=W0612
-                    # flake8: noqa
-                    sel = select([cursor], [], [], max(0, int(timeout)))
-                except InterruptedError:
-                    pass  # recalculate timeout and continue
+            if self._msg_n_consumed(cursor):
+                continue
+            self._select_or_timeout(cursor)
 
     def consume_sync(self, cursor: 'ReplicationCursor'):
         """Consume WAL stream and block till new messages arrive"""
