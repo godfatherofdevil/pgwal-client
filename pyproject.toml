@@ -50,3 +50,14 @@ include = ["/pgwal", "/tests", "requirements_dev.txt"]
 
 [tool.hatch.build.targets.wheel]
 include = ["/pgwal"]
+
+[tool.pytest.ini_options]
+addopts = "-s -vv"
+filterwarnings = [
+    "always",
+]
+log_cli_level = "INFO"
+log_cli_date_format = "%H:%M:%S:%f"
+log_cli = false
+log_cli_format = "%(asctime)s %(levelname)s %(threadName)s: %(message)s"
+log_level = "INFO"
