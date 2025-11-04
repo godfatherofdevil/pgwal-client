@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pgwal-client"
+dynamic = ["version"]
+description = "Python client for postgres WAL logical stream"
+long_description = "README.md"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.6"
+authors = [{ name = "Avinash Kumar", email = "avi410vikram@gmail.com" }]
+keywords = ["Postgres", "WAL", "Python client", "logical replication", "library", "rabbitmq"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Utilities",
+    ]
+dependencies = [
+    "pydantic>=2.12.0,<2.13.0",
+    "psycopg2==2.9.11"
+]
+
+[project.optional-dependencies]
+rabbitmq = ["pika==1.3.2"]
+
+[project.urls]
+Changes = "https://github.com/godfatherofdevil/pgwal-client/releases"
+Code = "https://github.com/godfatherofdevil/pgwal-client"
+Documentation = "https://github.com/godfatherofdevil/pgwal-client"
+Homepage = "https://github.com/godfatherofdevil/pgwal-client"
+"Issue tracker" = "https://github.com/godfatherofdevil/pgwal-client/issues"
+
+[tool.hatch.version]
+path = "pgwal/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["/pgwal", "/tests", "requirements_dev.txt"]
+
+[tool.hatch.build.targets.wheel]
+include = ["/pgwal"]
+
+[tool.pytest.ini_options]
+addopts = "-s -vv"
+filterwarnings = [
+    "always",
+]
+log_cli_level = "INFO"
+log_cli_date_format = "%H:%M:%S:%f"
+log_cli = false
+log_cli_format = "%(asctime)s %(levelname)s %(threadName)s: %(message)s"
+log_level = "INFO"

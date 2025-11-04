@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from lib.src.pgwal.interface import (
+from pgwal.interface import (
     WALReplicationOpts,
     _WALReplicationActions,
     WALReplicationValues,

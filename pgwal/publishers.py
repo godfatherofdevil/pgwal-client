@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Optional
 import pika
 from pika.exchange_type import ExchangeType
 
-from lib.src.pgwal.events import EXIT
+from pgwal.events import EXIT
 
 if TYPE_CHECKING:
     from psycopg2.extras import ReplicationMessage
