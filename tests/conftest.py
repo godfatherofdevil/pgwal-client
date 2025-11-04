@@ -4,9 +4,9 @@ from typing import Generator, TYPE_CHECKING
 import psycopg2
 from psycopg2.extras import LogicalReplicationConnection
 import pytest
-from lib.src.pgwal.consumers import WALConsumer
-from lib.src.pgwal.publishers import ShellPublisher
-from lib.src.pgwal.interface import WALReplicationOpts, WALReplicationValues
+from pgwal.consumers import WALConsumer
+from pgwal.publishers import ShellPublisher
+from pgwal.interface import WALReplicationOpts, WALReplicationValues
 
 
 if TYPE_CHECKING:
