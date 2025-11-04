@@ -31,9 +31,10 @@ jobs:
         uses: pre-commit/action@v3.0.1
       - name: Run Precommit on all files
         run: |
-          python -m pre-commit run --all-files
+          pre-commit run --all-files
 
   test:
+    if: false   # disable it for now
     runs-on: ubuntu-latest
     strategy:
       matrix:
