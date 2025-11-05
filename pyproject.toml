@@ -31,7 +31,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rabbitmq = ["pika==1.3.2"]
+rabbitmq = [
+    "pika==1.3.2"
+]
+kafka = [
+    "kafka-python>=2.2.0,<2.3.0"
+]
+all = [
+    "pika==1.3.2",
+    "kafka-python>=2.2.0,<2.3.0"
+]
 
 [project.urls]
 Changes = "https://github.com/godfatherofdevil/pgwal-client/releases"

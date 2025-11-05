@@ -1,93 +1,27 @@
-"""Replication Message Publishers module"""
-# pylint: disable=W0107,R0902,C0103,W0105,R0904
-import abc
+"""RabbitMQ Publisher"""
+# pylint: disable=R0902,C0103, R0904
 import functools
 import json
 import logging
-from queue import SimpleQueue, Empty
 import threading
-from typing import TYPE_CHECKING, Optional
+from queue import (
+    SimpleQueue,
+    Empty,
+)
+from typing import Optional
 
 import pika
 from pika.exchange_type import ExchangeType
+from psycopg2._psycopg import ReplicationMessage
 
-from pgwal.events import EXIT
+from .base import (
+    BasePublisher,
+    ensure_running,
+)
+from ..events import EXIT
 
-if TYPE_CHECKING:
-    from psycopg2.extras import ReplicationMessage
+
 logger = logging.getLogger(__name__)
-
-
-def run_publisher_daemon(publisher: 'BasePublisher'):
-    """Run publisher in a demon thread."""
-    task = threading.Thread(target=publisher.run)
-    task.daemon = True
-    task.start()
-
-
-def ensure_running(func):
-    """Ensure that a publisher is running"""
-
-    @functools.wraps(func)
-    def inner(publisher: 'BasePublisher', *args, **kwargs):
-        if publisher.is_running():
-            return func(publisher, *args, **kwargs)
-        run_publisher_daemon(publisher)
-        return func(publisher, *args, **kwargs)
-
-    return inner
-
-
-class BasePublisher(metaclass=abc.ABCMeta):
-    """Base Publisher"""
-
-    _lock = None
-    _running = False
-
-    @abc.abstractmethod
-    def publish(self, msg: 'ReplicationMessage'):
-        """publish replication message to required destination"""
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def run(self):
-        """run the publisher"""
-
-    @abc.abstractmethod
-    def stop(self):
-        """stop the publisher"""
-
-    def is_running(self) -> bool:
-        """check if the publisher is running"""
-        return self._running
-
-    def set_running(self, value: bool):
-        """Set the publisher to running status"""
-        if self._lock is not None:
-            with self._lock:
-                self._running = value
-
-
-class ShellPublisher(BasePublisher):
-    """A Publisher that logs the replication message to shell"""
-
-    # this is always running
-    _running = True
-
-    def publish(self, msg: 'ReplicationMessage'):
-        logger.info(
-            'payload %s, send_time %s',
-            msg.payload,
-            msg.send_time,
-        )
-
-    def run(self):
-        """Run ShellPublisher"""
-        pass
-
-    def stop(self):
-        """Stop ShellPublisher"""
-        pass
 
 
 class RabbitPublisher(BasePublisher):
@@ -357,10 +291,8 @@ class RabbitPublisher(BasePublisher):
                 if tmp_tag <= delivery_tag:
                     self._acked += 1
                     del self._deliveries[tmp_tag]
-        """
-        NOTE: at some point you would check self._deliveries for stale
-        entries and decide to attempt re-delivery
-        """
+        # NOTE: at some point you would check self._deliveries for stale
+        # entries and decide to attempt re-delivery
 
         logger.info(
             'Published %i messages, %i have yet to be confirmed, '
