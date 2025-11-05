@@ -1,7 +1,13 @@
 """Base Publisher"""
 import abc
 import functools
+import json
 import threading
+from queue import (
+    SimpleQueue,
+    Empty,
+)
+from typing import Optional
 
 from psycopg2._psycopg import ReplicationMessage
 
@@ -24,6 +30,28 @@ def ensure_running(func):
         return func(publisher, *args, **kwargs)
 
     return inner
+
+
+class MsgQueueMixin(metaclass=abc.ABCMeta):
+    """Abstract interface providing msg_queue property"""
+
+    _MSG_QUEUE = None
+
+    @property
+    @abc.abstractmethod
+    def msg_queue(self) -> SimpleQueue:
+        """return internal msg queue to use"""
+        raise NotImplementedError
+
+    def _get_message(self) -> Optional[str | bytes]:
+        """Get message if any from internal msg queue"""
+        try:
+            message = self.msg_queue.get_nowait()
+        except Empty:
+            return None
+        if not isinstance(message, (bytes, str)):
+            message = json.dumps(message, ensure_ascii=False)
+        return message
 
 
 class BasePublisher(metaclass=abc.ABCMeta):

@@ -1,30 +1,29 @@
 """RabbitMQ Publisher"""
 # pylint: disable=R0902,C0103, R0904
 import functools
-import json
 import logging
 import threading
-from queue import (
-    SimpleQueue,
-    Empty,
-)
-from typing import Optional
+from queue import SimpleQueue
+from typing import TYPE_CHECKING
 
 import pika
 from pika.exchange_type import ExchangeType
-from psycopg2._psycopg import ReplicationMessage
 
 from .base import (
     BasePublisher,
+    MsgQueueMixin,
     ensure_running,
 )
 from ..events import EXIT
+
+if TYPE_CHECKING:
+    from psycopg2._psycopg import ReplicationMessage
 
 
 logger = logging.getLogger(__name__)
 
 
-class RabbitPublisher(BasePublisher):
+class RabbitPublisher(BasePublisher, MsgQueueMixin):
     """A Publisher that sends the replication message to RabbitMQ"""
 
     _lock = threading.Lock()
@@ -63,6 +62,11 @@ class RabbitPublisher(BasePublisher):
         self._routing_key = routing_key
         self._exchange_type = exchange_type
         self.msg_headers = {}
+
+    @property
+    def msg_queue(self) -> SimpleQueue:
+        """return internal message queue to use"""
+        return self._MSG_QUEUE
 
     def connect(self):
         """This method connects to RabbitMQ, returning the connection handle.
@@ -311,16 +315,6 @@ class RabbitPublisher(BasePublisher):
         logger.info('Scheduling next message for %0.1f seconds', self._PUBLISH_INTERVAL)
         self._connection.ioloop.call_later(self._PUBLISH_INTERVAL, self.publish_message)
 
-    def _get_message(self) -> Optional[str | bytes]:
-        """Get message if any from internal msg queue"""
-        try:
-            message = self._MSG_QUEUE.get_nowait()
-        except Empty:
-            return None
-        if not isinstance(message, (bytes, str)):
-            message = json.dumps(message, ensure_ascii=False)
-        return message
-
     def publish_message(self):
         """
         read a message from internal SimpleQueue and if there is message then deliver it to RabbitMQ.
@@ -407,4 +401,4 @@ class RabbitPublisher(BasePublisher):
     @ensure_running
     def publish(self, msg: 'ReplicationMessage'):
         """Publish replication message"""
-        self._MSG_QUEUE.put_nowait(msg.payload)
+        self.msg_queue.put_nowait(msg.payload)

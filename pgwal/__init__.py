@@ -1,14 +1,16 @@
 """
 Postgres WAL Python client package
 """
+from .app import PGWAL
 from .consumers import WALConsumer
 from .interface import (
     WALReplicationValues,
     WALReplicationOpts,
 )
 from .publishers import (
-    ShellPublisher,
+    KafkaPublisher,
     RabbitPublisher,
+    ShellPublisher,
 )
 
 
@@ -25,9 +27,11 @@ __version__ = "0.0.1"
 VERSION = tuple(map(int_or_str, __version__.split(".")))
 
 __all__ = (
+    'PGWAL',
     'WALConsumer',
     'WALReplicationValues',
     'WALReplicationOpts',
     'ShellPublisher',
     'RabbitPublisher',
+    'KafkaPublisher',
 )
