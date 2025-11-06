@@ -1,7 +1,9 @@
 """Kafka Publisher"""
+import json
 import logging
 import threading
 import time
+from functools import cached_property
 from queue import SimpleQueue
 from typing import (
     TYPE_CHECKING,
@@ -27,7 +29,7 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
 
     _lock = threading.Lock()
     _MSG_QUEUE = SimpleQueue()
-    _PUBLISH_INTERVAL = 0.5
+    _PUBLISH_INTERVAL = 1
     _NAME = 'publisher:KafkaPublisher'
 
     def __init__(self, destination: str, **config):
@@ -37,12 +39,30 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
         :param config: Kafka broker configuration dict
         """
         self.destination = destination
-        self._producer = KafkaProducer(**config)
+        self._kafka_config = config
+        self._producer = None
+        # TODO: keep separate counters for successful deliveries and future deliveries
+        self._sent = 0
+
+    @cached_property
+    def producer(self) -> KafkaProducer:
+        """Initialize an instance of kafka producer and return it"""
+        self._producer = self._producer or KafkaProducer(**self._kafka_config)
+
+        return self._producer
 
     @property
     def msg_queue(self) -> SimpleQueue:
         """return internal message queue to use"""
         return self._MSG_QUEUE
+
+    def publish_message(self, message: str | bytes | bytearray | memoryview):
+        """Publish a message to Kafka broker"""
+        if isinstance(message, str):
+            message = message.encode('utf8')
+        self.producer.send(self.destination, message)
+        self._sent += 1
+        logger.info('TOTAL Published: %i', self._sent)
 
     def run(self):
         """Run this publisher"""
@@ -55,6 +75,13 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
                 break
             message = self._get_message()
             if message is None:
+                logger.debug(
+                    'Producer metric %s',
+                    json.dumps(
+                        self.producer.metrics(),
+                        indent=4,
+                    ),
+                )
                 logger.info(
                     'Nothing to publish!!! '
                     'Waiting for % seconds before reading next message',
@@ -62,7 +89,7 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
                 )
                 time.sleep(self._PUBLISH_INTERVAL)
                 continue
-            self._producer.send(self.destination, message)
+            self.publish_message(message)
 
     def stop(self):
         """Stop this publisher"""
