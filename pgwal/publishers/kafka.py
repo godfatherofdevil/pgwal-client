@@ -95,11 +95,11 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
         """Stop this publisher"""
         self.set_running(False)
         self.flush()
-        self._producer.close()
+        self.producer.close()
 
     def flush(self, timeout: Optional[float] = None):
         """makes all buffered records immediately available to send"""
-        self._producer.flush(timeout)
+        self.producer.flush(timeout)
 
     @ensure_running
     def publish(self, msg: 'ReplicationMessage'):

@@ -325,7 +325,9 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
             return
 
         properties = pika.BasicProperties(
-            app_id=self._NAME, content_type='application/json', headers=self.msg_headers
+            app_id=self._NAME,
+            content_type='application/json',
+            headers=self.msg_headers,
         )
         message = self._get_message()
         if message:
