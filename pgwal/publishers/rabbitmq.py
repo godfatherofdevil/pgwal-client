@@ -1,96 +1,29 @@
-"""Replication Message Publishers module"""
-# pylint: disable=W0107,R0902,C0103,W0105,R0904
-import abc
+"""RabbitMQ Publisher"""
+# pylint: disable=R0902,C0103, R0904
 import functools
-import json
 import logging
-from queue import SimpleQueue, Empty
 import threading
-from typing import TYPE_CHECKING, Optional
+from queue import SimpleQueue
+from typing import TYPE_CHECKING
 
 import pika
 from pika.exchange_type import ExchangeType
 
-from pgwal.events import EXIT
+from .base import (
+    BasePublisher,
+    MsgQueueMixin,
+    ensure_running,
+)
+from ..events import EXIT
 
 if TYPE_CHECKING:
-    from psycopg2.extras import ReplicationMessage
+    from psycopg2._psycopg import ReplicationMessage
+
+
 logger = logging.getLogger(__name__)
 
 
-def run_publisher_daemon(publisher: 'BasePublisher'):
-    """Run publisher in a demon thread."""
-    task = threading.Thread(target=publisher.run)
-    task.daemon = True
-    task.start()
-
-
-def ensure_running(func):
-    """Ensure that a publisher is running"""
-
-    @functools.wraps(func)
-    def inner(publisher: 'BasePublisher', *args, **kwargs):
-        if publisher.is_running():
-            return func(publisher, *args, **kwargs)
-        run_publisher_daemon(publisher)
-        return func(publisher, *args, **kwargs)
-
-    return inner
-
-
-class BasePublisher(metaclass=abc.ABCMeta):
-    """Base Publisher"""
-
-    _lock = None
-    _running = False
-
-    @abc.abstractmethod
-    def publish(self, msg: 'ReplicationMessage'):
-        """publish replication message to required destination"""
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def run(self):
-        """run the publisher"""
-
-    @abc.abstractmethod
-    def stop(self):
-        """stop the publisher"""
-
-    def is_running(self) -> bool:
-        """check if the publisher is running"""
-        return self._running
-
-    def set_running(self, value: bool):
-        """Set the publisher to running status"""
-        if self._lock is not None:
-            with self._lock:
-                self._running = value
-
-
-class ShellPublisher(BasePublisher):
-    """A Publisher that logs the replication message to shell"""
-
-    # this is always running
-    _running = True
-
-    def publish(self, msg: 'ReplicationMessage'):
-        logger.info(
-            'payload %s, send_time %s',
-            msg.payload,
-            msg.send_time,
-        )
-
-    def run(self):
-        """Run ShellPublisher"""
-        pass
-
-    def stop(self):
-        """Stop ShellPublisher"""
-        pass
-
-
-class RabbitPublisher(BasePublisher):
+class RabbitPublisher(BasePublisher, MsgQueueMixin):
     """A Publisher that sends the replication message to RabbitMQ"""
 
     _lock = threading.Lock()
@@ -129,6 +62,11 @@ class RabbitPublisher(BasePublisher):
         self._routing_key = routing_key
         self._exchange_type = exchange_type
         self.msg_headers = {}
+
+    @property
+    def msg_queue(self) -> SimpleQueue:
+        """return internal message queue to use"""
+        return self._MSG_QUEUE
 
     def connect(self):
         """This method connects to RabbitMQ, returning the connection handle.
@@ -357,10 +295,8 @@ class RabbitPublisher(BasePublisher):
                 if tmp_tag <= delivery_tag:
                     self._acked += 1
                     del self._deliveries[tmp_tag]
-        """
-        NOTE: at some point you would check self._deliveries for stale
-        entries and decide to attempt re-delivery
-        """
+        # NOTE: at some point you would check self._deliveries for stale
+        # entries and decide to attempt re-delivery
 
         logger.info(
             'Published %i messages, %i have yet to be confirmed, '
@@ -378,16 +314,6 @@ class RabbitPublisher(BasePublisher):
         """
         logger.info('Scheduling next message for %0.1f seconds', self._PUBLISH_INTERVAL)
         self._connection.ioloop.call_later(self._PUBLISH_INTERVAL, self.publish_message)
-
-    def _get_message(self) -> Optional[str | bytes]:
-        """Get message if any from internal msg queue"""
-        try:
-            message = self._MSG_QUEUE.get_nowait()
-        except Empty:
-            return None
-        if not isinstance(message, (bytes, str)):
-            message = json.dumps(message, ensure_ascii=False)
-        return message
 
     def publish_message(self):
         """
@@ -475,4 +401,4 @@ class RabbitPublisher(BasePublisher):
     @ensure_running
     def publish(self, msg: 'ReplicationMessage'):
         """Publish replication message"""
-        self._MSG_QUEUE.put_nowait(msg.payload)
+        self.msg_queue.put_nowait(msg.payload)
