@@ -1,4 +1,5 @@
 """Base Publisher"""
+from __future__ import annotations
 import abc
 import functools
 import json

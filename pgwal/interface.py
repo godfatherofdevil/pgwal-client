@@ -1,6 +1,17 @@
 """Internal interface models module"""
 # pylint: disable=C0103
-from enum import StrEnum
+from __future__ import annotations
+
+try:
+    from enum import StrEnum
+except ImportError:
+    # support older versions
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """Enum with string value"""
+
+
 from typing import List, Union
 
 from pydantic import (
