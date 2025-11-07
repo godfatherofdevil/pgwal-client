@@ -1,10 +1,18 @@
 """Postgres WAL consumers module"""
+import threading
 from collections.abc import Callable
 from datetime import datetime
 import logging
 from select import select
-from typing import List, TYPE_CHECKING
+from typing import (
+    List,
+    TYPE_CHECKING,
+    Tuple,
+)
 
+import psycopg2
+
+from .constants import CURSOR_FB_IO_DEFAULT_YEAR
 from .events import EXIT
 from .interface import WALReplicationOpts
 
@@ -22,6 +30,7 @@ logger = logging.getLogger(__name__)
 class WALConsumer(Callable):
     """Base WAL Stream consumer or subscriber."""
 
+    _lock = threading.Lock()
     _STATUS_INTERVAL = 10.0
 
     def __init__(
@@ -33,11 +42,43 @@ class WALConsumer(Callable):
         self.replication_slot = replication_slot
         self.replication_opts = replication_opts
         self.publishers = publishers or []
+        # Flag to indicate if consuming from server or not
+        self._consuming = False
+
+    def set_consuming(self, value: bool):
+        """Set _consuming flag"""
+        with self._lock:
+            self._consuming = value
+
+    @property
+    def consuming(self) -> bool:
+        """Whether consuming or not"""
+        return self._consuming
+
+    def stop(self):
+        """Stop this consumer"""
+        self.set_consuming(False)
 
     @property
     def output_plugin(self):
         """Output plugin to decode WAL stream."""
         return 'wal2json'
+
+    @staticmethod
+    def get_feedback_io_timestamp(
+        cursor: 'ReplicationCursor',
+    ) -> Tuple[datetime, datetime]:
+        """Get last server feedback and io timestamp on this cursor"""
+        return cursor.feedback_timestamp, cursor.io_timestamp
+
+    def _cursor_has_feedback_io(self, cursor: 'ReplicationCursor') -> bool:
+        """Whether cursor has different f/b or io timestamp set than default"""
+        fb_ts, io_ts = self.get_feedback_io_timestamp(cursor)
+
+        return (
+            fb_ts.year != CURSOR_FB_IO_DEFAULT_YEAR
+            or io_ts.year != CURSOR_FB_IO_DEFAULT_YEAR
+        )
 
     def start_replication(self, cursor: 'ReplicationCursor'):
         """Start replication stream"""
@@ -46,15 +87,24 @@ class WALConsumer(Callable):
             id(self),
             self.replication_slot,
         )
-        cursor.start_replication(
-            slot_name=self.replication_slot,
-            decode=True,
-            options=self.replication_opts.model_dump(
-                by_alias=True,
-                exclude_unset=True,
-                exclude_defaults=True,
-            ),
-        )
+        try:
+            cursor.start_replication(
+                slot_name=self.replication_slot,
+                decode=True,
+                options=self.replication_opts.model_dump(
+                    by_alias=True,
+                    exclude_unset=True,
+                    exclude_defaults=True,
+                ),
+            )
+        except psycopg2.OperationalError:
+            if self._cursor_has_feedback_io(cursor):
+                logger.warning(
+                    'Replication Slot %s has already started on this cursor',
+                    self.replication_slot,
+                )
+                return
+            raise
 
     def _consume(self, msg: 'ReplicationMessage'):
         """Consume one message and publish to all configured publishers"""
@@ -93,10 +143,12 @@ class WALConsumer(Callable):
         while True:
             if not EXIT.is_set():
                 logger.warning('Received EXIT event. breaking from the consuming loop')
+                self.stop()
                 break
             if cursor.closed:
                 logger.warning('Cursor is already closed. returning!!!')
                 return
+            self.set_consuming(True)
             if self._msg_n_consumed(cursor):
                 continue
             self._select_or_timeout(cursor)
