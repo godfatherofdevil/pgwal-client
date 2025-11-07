@@ -9,3 +9,7 @@ run_kafka:
 .PHONY: run_brokers
 run_brokers: run_rabbitmq run_kafka
 	docker ps -a
+
+.PHONY: run_tests
+run_tests:
+	python -m coverage run -m pytest
