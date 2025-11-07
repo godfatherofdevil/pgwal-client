@@ -6,17 +6,28 @@ from psycopg2.extras import LogicalReplicationConnection
 import pytest
 from pgwal.consumers import WALConsumer
 from pgwal.publishers import ShellPublisher
-from pgwal.interface import WALReplicationOpts, WALReplicationValues
+from pgwal.interface import (
+    WALReplicationOpts,
+    WALReplicationValues,
+)
 
 
 if TYPE_CHECKING:
-    from psycopg2.extras import ReplicationCursor
+    from psycopg2.extras import (
+        ReplicationCursor,
+        ReplicationMessage,
+    )
 
 
 class TestWALConsumer(WALConsumer):
     """WALConsumer for tests"""
 
     _STATUS_INTERVAL = 10.0
+
+    def _consume(self, msg: 'ReplicationMessage'):
+        for publisher in self.publishers:
+            publisher.publish(msg)
+        msg.cursor.send_feedback(flush_lsn=msg.data_start, force=True)
 
 
 @pytest.fixture(scope='session', autouse=True)
@@ -35,7 +46,9 @@ def db_conn() -> Generator['psycopg2.extensions.connection', None, None]:
     conn.commit()
     yield conn
     sql2 = 'DROP TABLE IF EXISTS demo'
+    sql3 = 'SELECT pg_drop_replication_slot(( %s ))'
     cursor.execute(sql2)
+    cursor.execute(sql3, ('repl_demo',))
     conn.commit()
     cursor.close()
     conn.close()
@@ -51,18 +64,6 @@ def db_replication_cursor() -> Generator['ReplicationCursor', None, None]:
     yield cursor
     conn.close()
     cursor.close()
-
-
-@pytest.fixture
-def db_repl_admin_cur() -> Generator['ReplicationCursor', None, None]:
-    conn = psycopg2.connect(
-        'host=localhost user=human password=secret port=5432 dbname=replication_demo',
-        connection_factory=LogicalReplicationConnection,
-    )
-    cursor = conn.cursor()
-    yield cursor
-    cursor.close()
-    conn.close()
 
 
 @pytest.fixture
