@@ -34,21 +34,19 @@ class TestWALConsumer(WALConsumer):
 def db_conn() -> Generator['psycopg2.extensions.connection', None, None]:
     """Make sure we have database connection and a test schema to start with"""
     conn = psycopg2.connect(
-        'host=localhost user=human password=secret port=5432 dbname=replication_demo'
+        'host=localhost user=tests password=secret port=5432 dbname=tests'
     )
     cursor = conn.cursor()
-    sql1 = (
+    sql_create_test = (
         'CREATE TABLE IF NOT EXISTS demo ('
         'id bigserial not null primary key, col1 varchar(100) not null, col2 bigint'
         ')'
     )
-    cursor.execute(sql1)
+    cursor.execute(sql_create_test)
     conn.commit()
     yield conn
-    sql2 = 'DROP TABLE IF EXISTS demo'
-    sql3 = 'SELECT pg_drop_replication_slot(( %s ))'
-    cursor.execute(sql2)
-    cursor.execute(sql3, ('repl_demo',))
+    sql_drop_test = 'DROP TABLE IF EXISTS demo'
+    cursor.execute(sql_drop_test)
     conn.commit()
     cursor.close()
     conn.close()
@@ -57,7 +55,7 @@ def db_conn() -> Generator['psycopg2.extensions.connection', None, None]:
 @pytest.fixture
 def db_replication_cursor() -> Generator['ReplicationCursor', None, None]:
     conn = psycopg2.connect(
-        'host=localhost user=human password=secret port=5432 dbname=replication_demo',
+        'host=localhost user=tests password=secret port=5432 dbname=tests',
         connection_factory=LogicalReplicationConnection,
     )
     cursor = conn.cursor()
@@ -69,7 +67,7 @@ def db_replication_cursor() -> Generator['ReplicationCursor', None, None]:
 @pytest.fixture
 def wal_consumer(db_replication_cursor):
     consumer = TestWALConsumer(
-        'repl_demo',
+        'repl_test',
         WALReplicationOpts(
             include_xids=WALReplicationValues.one,
             include_timestamp=WALReplicationValues.one,
@@ -78,7 +76,7 @@ def wal_consumer(db_replication_cursor):
     )
     try:
         db_replication_cursor.create_replication_slot(
-            'repl_demo', output_plugin='wal2json'
+            'repl_test', output_plugin='wal2json'
         )
     except psycopg2.errors.DuplicateObject:
         pass

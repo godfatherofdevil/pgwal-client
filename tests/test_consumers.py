@@ -1,8 +1,7 @@
 """Test consumers"""
+# pylint:disable=C0103,C0114,C0115,C0116,W0621,W0402
 import threading
 import time
-
-# pylint:disable=C0103,C0114,C0115,C0116,W0621,W0402
 from pgwal.events import EXIT
 
 

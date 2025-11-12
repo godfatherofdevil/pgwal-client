@@ -124,12 +124,16 @@ class WALConsumer(Callable):
         self._consume(msg)
         return True
 
-    def _select_or_timeout(self, cursor: 'ReplicationCursor'):
-        """Wait on cursor for a message or timeout and recalculate timeout and continue"""
-        timeout = (
+    def _get_cur_timeout(self, cursor: 'ReplicationCursor') -> float:
+        """Calculate and return the cursor timeout"""
+        return (
             self._STATUS_INTERVAL
             - (datetime.now() - cursor.feedback_timestamp).total_seconds()
         )
+
+    def _wait_on_repl_cursor(self, cursor: 'ReplicationCursor'):
+        """Wait on cursor for a message or timeout and recalculate timeout and continue"""
+        timeout = self._get_cur_timeout(cursor)
         try:
             # pylint: disable=W0612
             # flake8: noqa
@@ -151,7 +155,7 @@ class WALConsumer(Callable):
             self.set_consuming(True)
             if self._msg_n_consumed(cursor):
                 continue
-            self._select_or_timeout(cursor)
+            self._wait_on_repl_cursor(cursor)
 
     def consume_sync(self, cursor: 'ReplicationCursor'):
         """Consume WAL stream and block till new messages arrive"""
