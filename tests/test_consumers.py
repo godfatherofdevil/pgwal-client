@@ -66,7 +66,5 @@ def test__get_cur_timeout_returns_timeout_less_than_status_interval(
 ):
     create_test_data(db_conn)
     assert _wait_while_msg(wal_consumer, db_replication_cursor)
-    assert (
-        wal_consumer._get_cur_timeout(db_replication_cursor)
-        <= wal_consumer._STATUS_INTERVAL
-    )
+    timeout = wal_consumer._get_cur_timeout(db_replication_cursor)
+    assert 0 < timeout <= wal_consumer._STATUS_INTERVAL
