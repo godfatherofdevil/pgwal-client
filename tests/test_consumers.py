@@ -1,12 +1,14 @@
 """Test consumers"""
 # pylint:disable=C0103,C0114,C0115,C0116,W0621,W0402
+import datetime
 import threading
 import time
-
+from unittest.mock import patch
 from psycopg2.extras import ReplicationCursor
 
-from pgwal import WALConsumer
+from pgwal import WALConsumer, ShellPublisher
 from pgwal.events import EXIT
+from tests import ReplicationMessageMock
 
 
 def create_test_data(conn):
@@ -61,10 +63,28 @@ def test__get_cur_timeout_default(wal_consumer, db_replication_cursor):
     assert wal_consumer._get_cur_timeout(db_replication_cursor) < 0
 
 
-def test__get_cur_timeout_returns_timeout_less_than_status_interval(
-    wal_consumer, db_replication_cursor, db_conn
-):
+def test__get_cur_timeout_returns_timeout(wal_consumer, db_replication_cursor, db_conn):
     create_test_data(db_conn)
     assert _wait_while_msg(wal_consumer, db_replication_cursor)
     timeout = wal_consumer._get_cur_timeout(db_replication_cursor)
     assert 0 < timeout <= wal_consumer._STATUS_INTERVAL
+
+
+@patch.object(ShellPublisher, 'publish')
+def test__consume(publish_mock, wal_consumer, db_replication_cursor):
+    msg = ReplicationMessageMock(
+        {
+            'data_start': 0,
+            'payload': '{"key": "value"}',
+            'cursor': db_replication_cursor,
+        }
+    )
+    wal_consumer._consume(msg)
+    publish_mock.assert_called_once()
+
+    assert (
+        db_replication_cursor.feedback_timestamp.replace(
+            microsecond=0, tzinfo=None
+        ).isoformat()
+        == datetime.datetime.now().replace(microsecond=0, tzinfo=None).isoformat()
+    )

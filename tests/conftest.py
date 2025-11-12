@@ -65,14 +65,19 @@ def db_replication_cursor() -> Generator['ReplicationCursor', None, None]:
 
 
 @pytest.fixture
-def wal_consumer(db_replication_cursor):
+def shell_publisher():
+    yield ShellPublisher()
+
+
+@pytest.fixture
+def wal_consumer(db_replication_cursor, shell_publisher):
     consumer = TestWALConsumer(
         'repl_test',
         WALReplicationOpts(
             include_xids=WALReplicationValues.one,
             include_timestamp=WALReplicationValues.one,
         ),
-        [ShellPublisher()],
+        [shell_publisher],
     )
     try:
         db_replication_cursor.create_replication_slot(
