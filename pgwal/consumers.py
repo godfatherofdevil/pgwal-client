@@ -7,12 +7,9 @@ from select import select
 from typing import (
     List,
     TYPE_CHECKING,
-    Tuple,
 )
-
 import psycopg2
 
-from .constants import CURSOR_FB_IO_DEFAULT_YEAR
 from .events import EXIT
 from .interface import WALReplicationOpts
 
@@ -64,22 +61,6 @@ class WALConsumer(Callable):
         """Output plugin to decode WAL stream."""
         return 'wal2json'
 
-    @staticmethod
-    def get_feedback_io_timestamp(
-        cursor: 'ReplicationCursor',
-    ) -> Tuple[datetime, datetime]:
-        """Get last server feedback and io timestamp on this cursor"""
-        return cursor.feedback_timestamp, cursor.io_timestamp
-
-    def _cursor_has_feedback_io(self, cursor: 'ReplicationCursor') -> bool:
-        """Whether cursor has different f/b or io timestamp set than default"""
-        fb_ts, io_ts = self.get_feedback_io_timestamp(cursor)
-
-        return (
-            fb_ts.year != CURSOR_FB_IO_DEFAULT_YEAR
-            or io_ts.year != CURSOR_FB_IO_DEFAULT_YEAR
-        )
-
     def start_replication(self, cursor: 'ReplicationCursor'):
         """Start replication stream"""
         logger.debug(
@@ -98,13 +79,10 @@ class WALConsumer(Callable):
                 ),
             )
         except psycopg2.OperationalError:
-            if self._cursor_has_feedback_io(cursor):
-                logger.warning(
-                    'Replication Slot %s has already started on this cursor',
-                    self.replication_slot,
-                )
-                return
-            raise
+            logger.warning(
+                'Replication Slot %s has already started on this cursor',
+                self.replication_slot,
+            )
 
     def _consume(self, msg: 'ReplicationMessage'):
         """Consume one message and publish to all configured publishers"""
@@ -124,12 +102,16 @@ class WALConsumer(Callable):
         self._consume(msg)
         return True
 
-    def _select_or_timeout(self, cursor: 'ReplicationCursor'):
-        """Wait on cursor for a message or timeout and recalculate timeout and continue"""
-        timeout = (
+    def _get_cur_timeout(self, cursor: 'ReplicationCursor') -> float:
+        """Calculate and return the cursor timeout"""
+        return (
             self._STATUS_INTERVAL
             - (datetime.now() - cursor.feedback_timestamp).total_seconds()
         )
+
+    def _wait_on_repl_cursor(self, cursor: 'ReplicationCursor'):
+        """Wait on cursor for a message or timeout and recalculate timeout and continue"""
+        timeout = self._get_cur_timeout(cursor)
         try:
             # pylint: disable=W0612
             # flake8: noqa
@@ -151,7 +133,7 @@ class WALConsumer(Callable):
             self.set_consuming(True)
             if self._msg_n_consumed(cursor):
                 continue
-            self._select_or_timeout(cursor)
+            self._wait_on_repl_cursor(cursor)
 
     def consume_sync(self, cursor: 'ReplicationCursor'):
         """Consume WAL stream and block till new messages arrive"""
