@@ -1,9 +1,13 @@
 include .local/.env
 export
 
-.PHONY: login_github_cr
-login_github_cr:
-	echo $(GITHUB_CR_TOKEN) | docker login ghcr.io -u $(GITHUB_CR_USERNAME) --password-stdin
+TEST_DB_IMAGE=ghcr.io/godfatherofdevil/postgres-18-alpine-wal2json:latest
+TEST_DB_NAME=tests
+TEST_DB_USER=tests
+TEST_DB_PASSWORD=secret
+TEST_DB_PORT=5432
+TEST_DB_CONTAINER=pgwal-tests
+TEST_DB_SUPERUSER=$(TEST_DB_USER)
 
 .PHONY: run_rabbitmq
 run_rabbitmq:
@@ -17,13 +21,39 @@ run_kafka:
 run_brokers: run_rabbitmq run_kafka
 	docker ps -a
 
-.PHONY: build_psql_test
-build_psql_test: login_github_cr
-	docker build . -t psql-18-test -f docker/psql.test.Dockerfile
-
 .PHONY: run_psql_test
 run_psql_test:
-	docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=secret --name pgwal-tests psql-18-test
+	docker run --rm -d \
+		-p $(TEST_DB_PORT):5432 \
+		-e POSTGRES_DB=$(TEST_DB_NAME) \
+		-e POSTGRES_USER=$(TEST_DB_USER) \
+		-e POSTGRES_PASSWORD=$(TEST_DB_PASSWORD) \
+		--name $(TEST_DB_CONTAINER) \
+		--health-cmd "pg_isready -h 127.0.0.1 -U $(TEST_DB_USER) -d $(TEST_DB_NAME)" \
+		--health-interval 2s \
+		--health-timeout 5s \
+		--health-retries 30 \
+		$(TEST_DB_IMAGE)
+
+.PHONY: wait_psql_test
+wait_psql_test:
+	/bin/bash -c 'for _ in $$(seq 1 60); do \
+		status=$$(docker inspect --format="{{.State.Health.Status}}" $(TEST_DB_CONTAINER) 2>/dev/null); \
+		if [ "$$status" = "healthy" ]; then \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	docker logs $(TEST_DB_CONTAINER); \
+	exit 1'
+
+.PHONY: bootstrap_psql_test
+bootstrap_psql_test:
+	docker exec $(TEST_DB_CONTAINER) psql \
+		-h 127.0.0.1 \
+		-U $(TEST_DB_SUPERUSER) \
+		-d $(TEST_DB_NAME) \
+		-c "ALTER ROLE $(TEST_DB_USER) WITH REPLICATION;"
 
 .PHONY: test
 test:
@@ -31,15 +61,14 @@ test:
 
 .PHONY: clean
 clean:
-	docker stop pgwal-tests --time 0
+	-docker stop $(TEST_DB_CONTAINER) --timeout 0
 
 .PHONY: cov_report
 cov_report:
 	python -m coverage report
 
 .PHONY: run_tests
-run_tests: run_psql_test
-	echo "Running Tests. Waiting for 1 second for the db instance to be update" && sleep 1
+run_tests: run_psql_test wait_psql_test bootstrap_psql_test
 	make test && make cov_report
 
 .PHONY: update_docs_structure
