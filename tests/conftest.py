@@ -191,6 +191,12 @@ def rabbit_publisher(rabbitmq_settings):
 
     publisher.publish_payload = _publish_payload
 
+    def _wait_until_ready(timeout: float = 10.0):
+        if not publisher.ready.wait(timeout):
+            raise AssertionError('timed out waiting for RabbitPublisher readiness')
+
+    publisher.wait_until_ready = _wait_until_ready
+
     yield publisher
 
     publisher.stop()

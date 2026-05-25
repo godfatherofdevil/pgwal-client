@@ -60,6 +60,7 @@ def test_rabbit_publisher_delivers_string_payload(
     message = 'hello rabbitmq'
 
     rabbit_publisher.publish_payload(message)
+    rabbit_publisher.wait_until_ready()
 
     assert _read_one(rabbitmq_connection, rabbit_publisher.queue_name) == message
 
@@ -70,6 +71,7 @@ def test_rabbit_publisher_serializes_dict_payload(
     message = {'kind': 'insert', 'payload': {'id': 1, 'name': 'demo'}}
 
     rabbit_publisher.publish_payload(message)
+    rabbit_publisher.wait_until_ready()
 
     assert _read_one(rabbitmq_connection, rabbit_publisher.queue_name) == json.dumps(
         message, ensure_ascii=False
@@ -83,6 +85,7 @@ def test_rabbit_publisher_delivers_multiple_messages_in_order(
 
     for message in messages:
         rabbit_publisher.publish_payload(message)
+    rabbit_publisher.wait_until_ready()
 
     assert (
         _read_many(rabbitmq_connection, rabbit_publisher.queue_name, len(messages))
