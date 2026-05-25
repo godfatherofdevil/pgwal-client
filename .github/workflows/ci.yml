@@ -29,6 +29,10 @@ jobs:
           python-version: ${{ matrix.python_version }}
       - name: Setup Pre-commit
         uses: pre-commit/action@v3.0.1
+      - name: Verify generated structure docs
+        run: |
+          python scripts/update_project_structure.py
+          git diff --exit-code -- docs/project-structure.md
       - name: Run Precommit on all files
         run: |
           SKIP=no-commit-to-branch pre-commit run --all-files --show-diff-on-failure
