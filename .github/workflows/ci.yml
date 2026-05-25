@@ -22,6 +22,13 @@ env:
   TEST_DB_PORT: "5432"
   TEST_DB_CONTAINER: pgwal-tests
   TEST_DB_SUPERUSER: tests
+  TEST_RABBITMQ_IMAGE: rabbitmq:4.3-alpine
+  TEST_RABBITMQ_PORT: "5672"
+  TEST_RABBITMQ_CONTAINER: pgwal-rabbit-tests
+  TEST_RABBITMQ_HOST: localhost
+  TEST_RABBITMQ_USER: tests
+  TEST_RABBITMQ_PASSWORD: secret
+  TEST_RABBITMQ_VHOST: /
 
 jobs:
   lint:
@@ -89,6 +96,29 @@ jobs:
             -U "$TEST_DB_SUPERUSER" \
             -d "$TEST_DB_NAME" \
             -c "ALTER ROLE $TEST_DB_USER WITH REPLICATION;"
+      - name: Start RabbitMQ
+        run: |
+          docker run --rm -d \
+            --name "$TEST_RABBITMQ_CONTAINER" \
+            -p "$TEST_RABBITMQ_PORT:5672" \
+            -e RABBITMQ_DEFAULT_USER="$TEST_RABBITMQ_USER" \
+            -e RABBITMQ_DEFAULT_PASS="$TEST_RABBITMQ_PASSWORD" \
+            --health-cmd "rabbitmq-diagnostics -q ping" \
+            --health-interval 2s \
+            --health-timeout 5s \
+            --health-retries 30 \
+            "$TEST_RABBITMQ_IMAGE"
+      - name: Wait for RabbitMQ
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$TEST_RABBITMQ_CONTAINER" 2>/dev/null)
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$TEST_RABBITMQ_CONTAINER"
+          exit 1
       - name: Install Dependencies
         run: |
           python -m pip install -r requirements_dev.txt -r requirements_test.txt
@@ -99,6 +129,12 @@ jobs:
       - name: PostgreSQL logs
         if: always()
         run: docker logs "$TEST_DB_CONTAINER"
+      - name: RabbitMQ logs
+        if: always()
+        run: docker logs "$TEST_RABBITMQ_CONTAINER"
       - name: Stop PostgreSQL
         if: always()
         run: docker stop "$TEST_DB_CONTAINER"
+      - name: Stop RabbitMQ
+        if: always()
+        run: docker stop "$TEST_RABBITMQ_CONTAINER"

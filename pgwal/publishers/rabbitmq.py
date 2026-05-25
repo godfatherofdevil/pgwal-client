@@ -61,7 +61,13 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         self._queue = queue
         self._routing_key = routing_key
         self._exchange_type = exchange_type
+        self._ready = threading.Event()
         self.msg_headers = {}
+
+    @property
+    def ready(self) -> threading.Event:
+        """Event set after exchange, queue, and binding are ready."""
+        return self._ready
 
     @property
     def msg_queue(self) -> SimpleQueue:
@@ -117,6 +123,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
 
         """
         self._channel = None
+        self._ready.clear()
         if self._stopping:
             self._connection.ioloop.stop()
         else:
@@ -168,6 +175,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         """
         logger.warning('Channel %i was closed: %s', channel, reason)
         self._channel = None
+        self._ready.clear()
         if not self._stopping or not EXIT.is_set():
             self.close_connection()
 
@@ -207,7 +215,11 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
 
         """
         logger.info('Declaring queue %s', queue_name)
-        self._channel.queue_declare(queue=queue_name, callback=self.on_queue_declareok)
+        self._channel.queue_declare(
+            queue=queue_name,
+            durable=True,
+            callback=self.on_queue_declareok,
+        )
 
     def on_queue_declareok(self, _unused_frame):
         """Method invoked by pika when the Queue.Declare RPC call made in
@@ -234,6 +246,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         response from RabbitMQ. Since we know we're now setup and bound, it's
         time to start publishing."""
         logger.info('Queue bound')
+        self._ready.set()
         self.start_publishing()
 
     def start_publishing(self):
@@ -347,6 +360,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
     def run(self):
         """Run the publisher by connecting and then starting the IOLoop."""
         self.set_running(True)
+        self._ready.clear()
         while not self._stopping:
             # This is just an insurance to break from the ioloop when we need to exit
             if not EXIT.is_set():
@@ -376,6 +390,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         logger.info('Stopping')
         self.set_running(False)
         self._stopping = True
+        self._ready.clear()
         self.close_channel()
         self.close_connection()
 
