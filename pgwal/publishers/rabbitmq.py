@@ -207,7 +207,11 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
 
         """
         logger.info('Declaring queue %s', queue_name)
-        self._channel.queue_declare(queue=queue_name, callback=self.on_queue_declareok)
+        self._channel.queue_declare(
+            queue=queue_name,
+            durable=True,
+            callback=self.on_queue_declareok,
+        )
 
     def on_queue_declareok(self, _unused_frame):
         """Method invoked by pika when the Queue.Declare RPC call made in
