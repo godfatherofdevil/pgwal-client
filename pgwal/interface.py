@@ -11,6 +11,9 @@ except ImportError:
     class StrEnum(str, Enum):
         """Enum with string value"""
 
+        def __str__(self) -> str:
+            return self.value
+
 
 from typing import List, Union
 

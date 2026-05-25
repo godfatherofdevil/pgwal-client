@@ -8,10 +8,10 @@ Use this checklist:
 |-- AGENTS.md
 |-- README.md
 |-- docs/
+|-- specs/
 |-- scripts/
 |-- pgwal/
 |-- tests/
-|-- docker/
 `-- .github/
 ```
 
@@ -54,7 +54,6 @@ Use this checklist:
 - Run `pip install -r requirements_dev.txt -r requirements_test.txt` for dev and test dependencies.
 - Run `pip install -e .` for editable installs; use `pip install -e .[all]` for all publishers.
 - Run `python scripts/update_project_structure.py` or `make update_docs_structure` after layout changes.
-- Run `make build_psql_test_local` to build the PostgreSQL test image.
 - Run `make run_psql_test` to start the local test database.
 - Run `make run_tests` for the full test path with coverage.
 - Run `pre-commit run --all-files` before opening a pull request.
@@ -87,6 +86,10 @@ Use this checklist:
 - Include test evidence for replication, publisher, or connection-handling changes.
 
 ## Configuration Tips
-- Keep local secrets such as `GITHUB_CR_TOKEN` and `GITHUB_CR_USERNAME` in `.local/.env`.
+- Keep local overrides in `.local/.env`.
 - Keep `.local/.env` out of version control.
 - Do not hardcode credentials or broker endpoints in source or tests.
+
+## Agent Examples
+- Read `EXAMPLES.md` before making non-trivial changes. It is the canonical example set for how agents are expected to apply the repo principles in practice.
+- Treat `EXAMPLES.md` as normative guidance for handling ambiguity, avoiding overengineering, making surgical edits, and verifying work.
