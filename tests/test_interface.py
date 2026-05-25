@@ -28,6 +28,16 @@ def test_repl_opts_actions_serializes():
     assert repl_opts['actions'] == 'insert, update'
 
 
+def test_repl_opts_option_values_stringify():
+    repl_opts = WALReplicationOpts(
+        include_xids=WALReplicationValues.one,
+        include_timestamp=WALReplicationValues.one,
+    ).model_dump(by_alias=True, exclude_unset=True, exclude_defaults=True)
+
+    assert str(repl_opts['include-xids']) == '1'
+    assert str(repl_opts['include-timestamp']) == '1'
+
+
 def test_repl_opts_actions_init_with_str():
     repl_opts = WALReplicationOpts(actions='insert, update, delete')
     repl_opts_ = repl_opts.model_dump(by_alias=True)
