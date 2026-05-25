@@ -18,7 +18,7 @@ run_brokers: run_rabbitmq run_kafka
 	docker ps -a
 
 .PHONY: build_psql_test
-build_psql_test_local: login_github_cr
+build_psql_test: login_github_cr
 	docker build . -t psql-18-test -f docker/psql.test.Dockerfile
 
 .PHONY: run_psql_test
@@ -41,3 +41,7 @@ cov_report:
 run_tests: run_psql_test
 	echo "Running Tests. Waiting for 1 second for the db instance to be update" && sleep 1
 	make test && make cov_report
+
+.PHONY: update_docs_structure
+update_docs_structure:
+	python scripts/update_project_structure.py
