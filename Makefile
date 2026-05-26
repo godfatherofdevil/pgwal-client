@@ -15,6 +15,10 @@ TEST_RABBITMQ_HOST=localhost
 TEST_RABBITMQ_USER=tests
 TEST_RABBITMQ_PASSWORD=secret
 TEST_RABBITMQ_VHOST=/
+TEST_KAFKA_IMAGE=apache/kafka-native:3.9.1
+TEST_KAFKA_PORT=9092
+TEST_KAFKA_CONTAINER=pgwal-kafka-tests
+TEST_KAFKA_HOST=localhost
 
 .PHONY: run_rabbitmq_test
 run_rabbitmq_test:
@@ -41,12 +45,31 @@ wait_rabbitmq_test:
 	docker logs $(TEST_RABBITMQ_CONTAINER); \
 	exit 1'
 
-.PHONY: run_kafka
-run_kafka:
-	docker run -d --rm -p 9092:9092 --name kafka-broker apache/kafka:latest
+.PHONY: run_kafka_test
+run_kafka_test:
+	docker run --rm -d \
+		-p $(TEST_KAFKA_PORT):9092 \
+		--name $(TEST_KAFKA_CONTAINER) \
+		--health-cmd '/bin/bash -lc "exec 3<>/dev/tcp/127.0.0.1/9092"' \
+		--health-interval 2s \
+		--health-timeout 5s \
+		--health-retries 30 \
+		$(TEST_KAFKA_IMAGE)
+
+.PHONY: wait_kafka_test
+wait_kafka_test:
+	/bin/bash -c 'for _ in $$(seq 1 60); do \
+		status=$$(docker inspect --format="{{.State.Health.Status}}" $(TEST_KAFKA_CONTAINER) 2>/dev/null); \
+		if [ "$$status" = "healthy" ]; then \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	docker logs $(TEST_KAFKA_CONTAINER); \
+	exit 1'
 
 .PHONY: run_brokers
-run_brokers: run_rabbitmq_test run_kafka
+run_brokers: run_rabbitmq_test run_kafka_test
 	docker ps -a
 
 .PHONY: run_psql_test
@@ -85,19 +108,20 @@ bootstrap_psql_test:
 
 .PHONY: test
 test:
-	/bin/bash -c "TEST_RABBITMQ_HOST=$(TEST_RABBITMQ_HOST) TEST_RABBITMQ_PORT=$(TEST_RABBITMQ_PORT) TEST_RABBITMQ_USER=$(TEST_RABBITMQ_USER) TEST_RABBITMQ_PASSWORD=$(TEST_RABBITMQ_PASSWORD) TEST_RABBITMQ_VHOST=$(TEST_RABBITMQ_VHOST) python -m coverage run -m pytest;make clean"
+	/bin/bash -c "TEST_RABBITMQ_HOST=$(TEST_RABBITMQ_HOST) TEST_RABBITMQ_PORT=$(TEST_RABBITMQ_PORT) TEST_RABBITMQ_USER=$(TEST_RABBITMQ_USER) TEST_RABBITMQ_PASSWORD=$(TEST_RABBITMQ_PASSWORD) TEST_RABBITMQ_VHOST=$(TEST_RABBITMQ_VHOST) TEST_KAFKA_HOST=$(TEST_KAFKA_HOST) TEST_KAFKA_PORT=$(TEST_KAFKA_PORT) python -m coverage run -m pytest;make clean"
 
 .PHONY: clean
 clean:
 	/bin/bash -c 'docker stop $(TEST_DB_CONTAINER) --timeout 0 >/dev/null 2>&1 || true'
 	/bin/bash -c 'docker stop $(TEST_RABBITMQ_CONTAINER) --timeout 0 >/dev/null 2>&1 || true'
+	/bin/bash -c 'docker stop $(TEST_KAFKA_CONTAINER) --timeout 0 >/dev/null 2>&1 || true'
 
 .PHONY: cov_report
 cov_report:
 	python -m coverage report
 
 .PHONY: run_tests
-run_tests: run_psql_test wait_psql_test bootstrap_psql_test run_rabbitmq_test wait_rabbitmq_test
+run_tests: run_psql_test wait_psql_test bootstrap_psql_test run_rabbitmq_test wait_rabbitmq_test run_kafka_test wait_kafka_test
 	make test && make cov_report
 
 .PHONY: update_docs_structure

@@ -29,6 +29,10 @@ env:
   TEST_RABBITMQ_USER: tests
   TEST_RABBITMQ_PASSWORD: secret
   TEST_RABBITMQ_VHOST: /
+  TEST_KAFKA_IMAGE: apache/kafka-native:3.9.1
+  TEST_KAFKA_PORT: "9092"
+  TEST_KAFKA_CONTAINER: pgwal-kafka-tests
+  TEST_KAFKA_HOST: localhost
 
 jobs:
   lint:
@@ -118,6 +122,27 @@ jobs:
           done
           docker logs "$TEST_RABBITMQ_CONTAINER"
           exit 1
+      - name: Start Kafka
+        run: |
+          docker run --rm -d \
+            --name "$TEST_KAFKA_CONTAINER" \
+            -p "$TEST_KAFKA_PORT:9092" \
+            --health-cmd '/bin/bash -lc "exec 3<>/dev/tcp/127.0.0.1/9092"' \
+            --health-interval 2s \
+            --health-timeout 5s \
+            --health-retries 30 \
+            "$TEST_KAFKA_IMAGE"
+      - name: Wait for Kafka
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$TEST_KAFKA_CONTAINER" 2>/dev/null)
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$TEST_KAFKA_CONTAINER"
+          exit 1
       - name: Install Dependencies
         run: |
           python -m pip install -r requirements_dev.txt -r requirements_test.txt
@@ -131,9 +156,15 @@ jobs:
       - name: RabbitMQ logs
         if: always()
         run: docker logs "$TEST_RABBITMQ_CONTAINER"
+      - name: Kafka logs
+        if: always()
+        run: docker logs "$TEST_KAFKA_CONTAINER"
       - name: Stop PostgreSQL
         if: always()
         run: docker stop "$TEST_DB_CONTAINER"
       - name: Stop RabbitMQ
         if: always()
         run: docker stop "$TEST_RABBITMQ_CONTAINER"
+      - name: Stop Kafka
+        if: always()
+        run: docker stop "$TEST_KAFKA_CONTAINER"
