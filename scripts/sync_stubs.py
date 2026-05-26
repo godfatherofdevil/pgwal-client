@@ -4,9 +4,10 @@ from __future__ import annotations
 import argparse
 import filecmp
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
+
+from mypy import stubgen
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14,16 +15,13 @@ PACKAGE_DIR = ROOT / 'pgwal'
 
 
 def _run_stubgen(output_dir: Path) -> None:
-    subprocess.run(
+    stubgen.main(
         [
-            'stubgen',
             '--no-import',
             '-o',
             str(output_dir),
             str(PACKAGE_DIR),
-        ],
-        check=True,
-        cwd=ROOT,
+        ]
     )
 
 
