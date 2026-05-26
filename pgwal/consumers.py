@@ -1,13 +1,11 @@
 """Postgres WAL consumers module"""
+from __future__ import annotations
+
 import threading
-from collections.abc import Callable
 from datetime import datetime
 import logging
 from select import select
-from typing import (
-    List,
-    TYPE_CHECKING,
-)
+from typing import TYPE_CHECKING, cast
 import psycopg2
 
 from .events import EXIT
@@ -18,13 +16,13 @@ if TYPE_CHECKING:
         ReplicationCursor,
         ReplicationMessage,
     )
-    from .publishers import BasePublisher
+    from .publishers.base import BasePublisher
 
 
 logger = logging.getLogger(__name__)
 
 
-class WALConsumer(Callable):
+class WALConsumer:
     """Base WAL Stream consumer or subscriber."""
 
     _lock = threading.Lock()
@@ -34,15 +32,15 @@ class WALConsumer(Callable):
         self,
         replication_slot: str,
         replication_opts: WALReplicationOpts,
-        publishers: List['BasePublisher'] = None,
-    ):
+        publishers: list['BasePublisher'] | None = None,
+    ) -> None:
         self.replication_slot = replication_slot
         self.replication_opts = replication_opts
         self.publishers = publishers or []
         # Flag to indicate if consuming from server or not
         self._consuming = False
 
-    def set_consuming(self, value: bool):
+    def set_consuming(self, value: bool) -> None:
         """Set _consuming flag"""
         with self._lock:
             self._consuming = value
@@ -52,16 +50,16 @@ class WALConsumer(Callable):
         """Whether consuming or not"""
         return self._consuming
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop this consumer"""
         self.set_consuming(False)
 
     @property
-    def output_plugin(self):
+    def output_plugin(self) -> str:
         """Output plugin to decode WAL stream."""
         return 'wal2json'
 
-    def start_replication(self, cursor: 'ReplicationCursor'):
+    def start_replication(self, cursor: 'ReplicationCursor') -> None:
         """Start replication stream"""
         logger.debug(
             'Consumer %s, Starting the replication slot %s',
@@ -84,7 +82,7 @@ class WALConsumer(Callable):
                 self.replication_slot,
             )
 
-    def _consume(self, msg: 'ReplicationMessage'):
+    def _consume(self, msg: 'ReplicationMessage') -> None:
         """Consume one message and publish to all configured publishers"""
         for publisher in self.publishers:
             publisher.publish(msg)
@@ -104,22 +102,23 @@ class WALConsumer(Callable):
 
     def _get_cur_timeout(self, cursor: 'ReplicationCursor') -> float:
         """Calculate and return the cursor timeout"""
+        feedback_timestamp = cast(datetime | None, cursor.feedback_timestamp)
+        if feedback_timestamp is None:
+            return -1.0
         return (
             self._STATUS_INTERVAL
-            - (datetime.now() - cursor.feedback_timestamp).total_seconds()
+            - (datetime.now() - feedback_timestamp).total_seconds()
         )
 
-    def _wait_on_repl_cursor(self, cursor: 'ReplicationCursor'):
+    def _wait_on_repl_cursor(self, cursor: 'ReplicationCursor') -> None:
         """Wait on cursor for a message or timeout and recalculate timeout and continue"""
         timeout = self._get_cur_timeout(cursor)
         try:
-            # pylint: disable=W0612
-            # flake8: noqa
-            sel = select([cursor], [], [], max(0, int(timeout)))
+            select([cursor], [], [], max(0, int(timeout)))
         except InterruptedError:
             pass  # recalculate timeout and continue
 
-    def consume_async(self, cursor: 'ReplicationCursor'):
+    def consume_async(self, cursor: 'ReplicationCursor') -> None:
         """Consume WAL stream without blocking"""
         self.start_replication(cursor)
         while True:
@@ -135,11 +134,11 @@ class WALConsumer(Callable):
                 continue
             self._wait_on_repl_cursor(cursor)
 
-    def consume_sync(self, cursor: 'ReplicationCursor'):
+    def consume_sync(self, cursor: 'ReplicationCursor') -> None:
         """Consume WAL stream and block till new messages arrive"""
         cursor.consume_stream(self)
 
-    def __call__(self, msg: 'ReplicationMessage'):
+    def __call__(self, msg: 'ReplicationMessage') -> None:
         """
         callback to ReplicationCursor.consume_stream,
         for more details https://www.psycopg.org/docs/extras.html#psycopg2.extras.ReplicationCursor.consume_stream

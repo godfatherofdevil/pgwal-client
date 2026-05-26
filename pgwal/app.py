@@ -3,7 +3,7 @@ import time
 from functools import cached_property
 import logging
 import threading
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, cast
 
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import LogicalReplicationConnection
@@ -11,7 +11,7 @@ from .events import EXIT
 
 if TYPE_CHECKING:
     from .consumers import WALConsumer
-    from .publishers import BasePublisher
+    from .publishers.base import BasePublisher
 
 
 POOL_MIN = 1
@@ -22,15 +22,15 @@ logger = logging.getLogger(__name__)
 class PGWAL:
     """A Postgres WAL stream consumer that supports routing them further to multiple destinations"""
 
-    def __init__(self, dsn: dict):
+    def __init__(self, dsn: dict[str, object]) -> None:
         """
         :param dsn: connection parameters in dict format
         """
         self.dsn = dsn
-        self._pool = None
-        self.tasks: List[threading.Thread] = []
+        self._pool: ThreadedConnectionPool | None = None
+        self.tasks: list[threading.Thread] = []
         # We maintain a list of publishers so that we can gracefully exit
-        self.publishers: List['BasePublisher'] = []
+        self.publishers: list['BasePublisher'] = []
 
     @cached_property
     def pool(self) -> ThreadedConnectionPool:
@@ -44,21 +44,21 @@ class PGWAL:
             )
         return self._pool
 
-    def close_pool(self):
+    def close_pool(self) -> None:
         """Close all connections from the pool"""
         if self._pool is not None and not self._pool.closed:
             self._pool.closeall()
 
-    def stop_publishers(self):
+    def stop_publishers(self) -> None:
         """Stop all publishers before exiting"""
         for publisher in self.publishers:
             publisher.stop()
 
     def get_conn(self) -> 'LogicalReplicationConnection':
         """Get a connection from pool"""
-        return self.pool.getconn()
+        return cast(LogicalReplicationConnection, self.pool.getconn())
 
-    def _consume(self, consumer: 'WALConsumer'):
+    def _consume(self, consumer: 'WALConsumer') -> None:
         """consume a WAL stream"""
         conn = self.get_conn()
         cursor = conn.cursor()
@@ -82,16 +82,16 @@ class PGWAL:
 
         return task
 
-    def run(self):
+    def run(self) -> None:
         """Run and wait for all the tasks. This is a blocking call."""
         EXIT.set()
 
-        def _start():
+        def _start() -> None:
             """Start all the tasks"""
             for task in self.tasks:
                 task.start()
 
-        def _wait():
+        def _wait() -> None:
             """Wait for all tasks"""
             for task in self.tasks:
                 task.join()

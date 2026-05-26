@@ -6,6 +6,11 @@ repos:
         entry: python scripts/update_project_structure.py
         language: system
         pass_filenames: false
+    -   id: sync-pgwal-stubs
+        name: sync pgwal stubs
+        entry: python scripts/sync_stubs.py
+        language: system
+        pass_filenames: false
 -   repo: https://github.com/psf/black
     rev: 22.3.0
     hooks:
@@ -17,10 +22,20 @@ repos:
     hooks:
       -   id: flake8
 -   repo: https://github.com/pycqa/pylint
-    rev: v4.0.0
+    rev: v3.2.7
     hooks:
       -   id: pylint
           name: pylint (python)
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      -   id: mypy
+          additional_dependencies:
+            - pydantic>=2.12.0,<2.13.0
+            - psycopg2-binary==2.9.11
+            - types-psycopg2>=2.9.21,<3
+          pass_filenames: false
+          args: ["-p", "pgwal"]
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

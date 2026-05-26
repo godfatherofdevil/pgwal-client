@@ -1,0 +1,28 @@
+from .base import (
+    BasePublisher as BasePublisher,
+    MsgQueueMixin as MsgQueueMixin,
+    PublisherMessage as PublisherMessage,
+    QueueMessage as QueueMessage,
+    ensure_running as ensure_running,
+)
+from _typeshed import Incomplete as Incomplete
+from functools import cached_property as cached_property
+from kafka import KafkaProducer as KafkaProducer
+from psycopg2.extras import ReplicationMessage
+from queue import SimpleQueue
+
+logger: Incomplete
+
+class KafkaPublisher(BasePublisher, MsgQueueMixin):
+    destination: Incomplete
+    def __init__(self, destination: str, **config: object) -> None: ...
+    @cached_property
+    def producer(self) -> KafkaProducer: ...
+    @property
+    def msg_queue(self) -> SimpleQueue[PublisherMessage]: ...
+    def publish_message(self, message: QueueMessage) -> None: ...
+    def run(self) -> None: ...
+    def stop(self) -> None: ...
+    def flush(self, timeout: float | None = None) -> None: ...
+    @ensure_running
+    def publish(self, msg: ReplicationMessage) -> None: ...
