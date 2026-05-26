@@ -1,25 +1,26 @@
 """Kafka Publisher"""
+from __future__ import annotations
+
 import json
 import logging
 import threading
 import time
 from functools import cached_property
 from queue import SimpleQueue
-from typing import (
-    TYPE_CHECKING,
-    Optional,
-)
+from typing import TYPE_CHECKING
 
 from kafka import KafkaProducer
 from .base import (
     BasePublisher,
+    PublisherMessage,
     MsgQueueMixin,
+    QueueMessage,
     ensure_running,
 )
 from ..events import EXIT
 
 if TYPE_CHECKING:
-    from psycopg2._psycopg import ReplicationMessage
+    from psycopg2.extras import ReplicationMessage
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +33,15 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
     _PUBLISH_INTERVAL = 1
     _NAME = 'publisher:KafkaPublisher'
 
-    def __init__(self, destination: str, **config):
+    def __init__(self, destination: str, **config: object) -> None:
         """
 
         :param destination: destination topic name
         :param config: Kafka broker configuration dict
         """
         self.destination = destination
-        self._kafka_config = config
-        self._producer = None
+        self._kafka_config: dict[str, object] = config
+        self._producer: KafkaProducer | None = None
         # TODO: keep separate counters for successful deliveries and future deliveries
         self._sent = 0
 
@@ -52,11 +53,11 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
         return self._producer
 
     @property
-    def msg_queue(self) -> SimpleQueue:
+    def msg_queue(self) -> SimpleQueue[PublisherMessage]:
         """return internal message queue to use"""
         return self._MSG_QUEUE
 
-    def publish_message(self, message: str | bytes | bytearray | memoryview):
+    def publish_message(self, message: QueueMessage) -> None:
         """Publish a message to Kafka broker"""
         if isinstance(message, str):
             message = message.encode('utf8')
@@ -64,7 +65,7 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
         self._sent += 1
         logger.info('TOTAL Published: %i', self._sent)
 
-    def run(self):
+    def run(self) -> None:
         """Run this publisher"""
         self.set_running(True)
         while True:
@@ -91,17 +92,17 @@ class KafkaPublisher(BasePublisher, MsgQueueMixin):
                 continue
             self.publish_message(message)
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop this publisher"""
         self.set_running(False)
         self.flush()
         self.producer.close()
 
-    def flush(self, timeout: Optional[float] = None):
+    def flush(self, timeout: float | None = None) -> None:
         """makes all buffered records immediately available to send"""
         self.producer.flush(timeout)
 
     @ensure_running
-    def publish(self, msg: 'ReplicationMessage'):
+    def publish(self, msg: 'ReplicationMessage') -> None:
         """Publish a replication message"""
         self.msg_queue.put_nowait(msg.payload)

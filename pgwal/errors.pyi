@@ -1,0 +1,3 @@
+from pydantic import ValidationError
+
+class InvalidReplicationAction(ValidationError): ...

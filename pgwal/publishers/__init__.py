@@ -4,3 +4,10 @@ from .base import BasePublisher
 from .rabbitmq import RabbitPublisher
 from .kafka import KafkaPublisher
 from .shell import ShellPublisher
+
+__all__ = (
+    'BasePublisher',
+    'RabbitPublisher',
+    'KafkaPublisher',
+    'ShellPublisher',
+)

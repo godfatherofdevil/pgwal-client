@@ -1,6 +1,8 @@
 """
 Postgres WAL Python client package
 """
+from __future__ import annotations
+
 from .app import PGWAL
 from .consumers import WALConsumer
 from .interface import (
@@ -14,7 +16,7 @@ from .publishers import (
 )
 
 
-def int_or_str(value):
+def int_or_str(value: str) -> int | str:
     """int or string value"""
     try:
         return int(value)

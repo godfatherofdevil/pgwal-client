@@ -103,3 +103,18 @@ run_tests: run_psql_test wait_psql_test bootstrap_psql_test run_rabbitmq_test wa
 .PHONY: update_docs_structure
 update_docs_structure:
 	python scripts/update_project_structure.py
+
+.PHONY: typecheck
+typecheck:
+	python -m mypy pgwal
+
+.PHONY: sync_stubs
+sync_stubs:
+	python scripts/sync_stubs.py
+
+.PHONY: check_stubs
+check_stubs:
+	python scripts/sync_stubs.py --check
+
+.PHONY: generate_stubs
+generate_stubs: sync_stubs

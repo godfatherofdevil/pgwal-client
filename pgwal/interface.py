@@ -2,27 +2,21 @@
 # pylint: disable=C0103
 from __future__ import annotations
 
-try:
-    from enum import StrEnum
-except ImportError:
-    # support older versions
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        """Enum with string value"""
-
-        def __str__(self) -> str:
-            return self.value
-
-
-from typing import List, Union
-
+from enum import Enum
 from pydantic import (
     BaseModel,
     Field,
     field_validator,
 )
+
 from .errors import InvalidReplicationAction
+
+
+class StrEnum(str, Enum):
+    """Enum with string value."""
+
+    def __str__(self) -> str:
+        return str(self.value)
 
 
 class WALReplicationValues(StrEnum):
@@ -42,7 +36,7 @@ class WALReplicationValues(StrEnum):
     truncate = 'truncate'
 
 
-_WALReplicationActions = [
+_WALReplicationActions: list[WALReplicationValues] = [
     WALReplicationValues.insert,
     WALReplicationValues.update,
     WALReplicationValues.delete,
@@ -124,23 +118,23 @@ class WALReplicationOpts(BaseModel):
         WALReplicationValues.one,
         serialization_alias='include-transaction',
     )
-    filter_origins: List[str] | str = Field(
+    filter_origins: list[str] | str = Field(
         WALReplicationValues.nil,
         serialization_alias='filter-origins',
     )
-    filter_tables: List[str] | str = Field(
+    filter_tables: list[str] | str = Field(
         WALReplicationValues.nil,
         serialization_alias='filter-tables',
     )
-    add_tables: List[str] | str = Field(
+    add_tables: list[str] | str = Field(
         WALReplicationValues.nil,
         serialization_alias='add-tables',
     )
-    filter_msg_prefixes: List[str] | str = Field(
+    filter_msg_prefixes: list[str] | str = Field(
         WALReplicationValues.nil,
         serialization_alias='filter-msg-prefixes',
     )
-    add_msg_prefixes: List[str] | str = Field(
+    add_msg_prefixes: list[str] | str = Field(
         WALReplicationValues.nil,
         serialization_alias='add-msg-prefixes',
     )
@@ -148,11 +142,14 @@ class WALReplicationOpts(BaseModel):
         WALReplicationValues.one,
         serialization_alias='format-version',
     )
-    actions: List[WALReplicationValues] | str = Field(_WALReplicationActions)
+    actions: list[WALReplicationValues] | str = Field(_WALReplicationActions)
 
     @field_validator('actions')
     @classmethod
-    def validate_actions(cls, value: Union[List[WALReplicationValues], str]) -> str:
+    def validate_actions(
+        cls,
+        value: list[WALReplicationValues] | str,
+    ) -> str:
         """Validate and build the string format for the actions"""
         if isinstance(value, str):
             value = [WALReplicationValues(v.strip()) for v in value.strip().split(',')]
@@ -187,7 +184,7 @@ class WALReplicationOpts(BaseModel):
         'add_msg_prefixes',
     )
     @classmethod
-    def validate_list_str(cls, value: str | List[str]) -> str:
+    def validate_list_str(cls, value: str | list[str]) -> str:
         """
         Validate all such replication options which takes comma seperated string as value,
         and return the string format from the list. raise error if invalid value is supplied
