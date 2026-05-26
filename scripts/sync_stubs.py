@@ -5,7 +5,6 @@ import argparse
 import filecmp
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -22,20 +21,6 @@ def _run_stubgen(output_dir: Path) -> None:
             '-o',
             str(output_dir),
             str(PACKAGE_DIR),
-        ],
-        check=True,
-        cwd=ROOT,
-    )
-
-
-def _format_generated_stubs(generated_package_dir: Path) -> None:
-    subprocess.run(
-        [
-            sys.executable,
-            '-m',
-            'black',
-            '-S',
-            str(generated_package_dir),
         ],
         check=True,
         cwd=ROOT,
@@ -99,7 +84,6 @@ def sync_stubs(check: bool) -> int:
         output_dir = Path(tmp_dir)
         _run_stubgen(output_dir)
         generated_package_dir = _normalize_package_stubs(output_dir)
-        _format_generated_stubs(generated_package_dir)
 
         if check:
             return 0 if _stubs_are_synced(generated_package_dir) else 1

@@ -9,12 +9,7 @@ class WALConsumer:
     replication_slot: Incomplete
     replication_opts: Incomplete
     publishers: Incomplete
-    def __init__(
-        self,
-        replication_slot: str,
-        replication_opts: WALReplicationOpts,
-        publishers: list['BasePublisher'] | None = None,
-    ) -> None: ...
+    def __init__(self, replication_slot: str, replication_opts: WALReplicationOpts, publishers: list['BasePublisher'] | None = None) -> None: ...
     def set_consuming(self, value: bool) -> None: ...
     @property
     def consuming(self) -> bool: ...

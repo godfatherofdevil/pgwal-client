@@ -1,10 +1,4 @@
-from .base import (
-    BasePublisher as BasePublisher,
-    MsgQueueMixin as MsgQueueMixin,
-    PublisherMessage as PublisherMessage,
-    QueueMessage as QueueMessage,
-    ensure_running as ensure_running,
-)
+from .base import BasePublisher as BasePublisher, MsgQueueMixin as MsgQueueMixin, PublisherMessage as PublisherMessage, QueueMessage as QueueMessage, ensure_running as ensure_running
 from _typeshed import Incomplete as Incomplete
 from functools import cached_property as cached_property
 from kafka import KafkaProducer as KafkaProducer
