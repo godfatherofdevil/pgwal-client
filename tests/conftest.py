@@ -6,12 +6,16 @@ from dataclasses import dataclass
 from queue import Empty
 from typing import Generator, TYPE_CHECKING
 
+from kafka import KafkaAdminClient, KafkaConsumer
+from kafka.admin import NewTopic
+from kafka.errors import NoBrokersAvailable, TopicAlreadyExistsError
 import pika
 import psycopg2
 from psycopg2.extras import LogicalReplicationConnection
 import pytest
 from pgwal.consumers import WALConsumer
 from pgwal.publishers import ShellPublisher
+from pgwal.publishers.kafka import KafkaPublisher
 from pgwal.publishers.rabbitmq import RabbitPublisher
 from pgwal.events import EXIT
 from pgwal.interface import (
@@ -59,6 +63,26 @@ class RabbitMQSettings:
 
 class RabbitPayloadMessage:
     """Minimal test message for RabbitPublisher."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+
+@dataclass
+class KafkaSettings:
+    """Kafka test broker settings."""
+
+    host: str
+    port: int
+
+    @property
+    def bootstrap_servers(self) -> str:
+        """Bootstrap server string for kafka-python."""
+        return f'{self.host}:{self.port}'
+
+
+class KafkaPayloadMessage:
+    """Minimal test message for KafkaPublisher."""
 
     def __init__(self, payload):
         self.payload = payload
@@ -131,6 +155,14 @@ def rabbitmq_settings() -> RabbitMQSettings:
         user=os.getenv('TEST_RABBITMQ_USER', 'tests'),
         password=os.getenv('TEST_RABBITMQ_PASSWORD', 'secret'),
         vhost=os.getenv('TEST_RABBITMQ_VHOST', '/'),
+    )
+
+
+@pytest.fixture(scope='session')
+def kafka_settings() -> KafkaSettings:
+    return KafkaSettings(
+        host=os.getenv('TEST_KAFKA_HOST', 'localhost'),
+        port=int(os.getenv('TEST_KAFKA_PORT', '9092')),
     )
 
 
@@ -210,6 +242,103 @@ def rabbit_publisher(rabbitmq_settings):
     while True:
         try:
             publisher.msg_queue.get_nowait()
+        except Empty:
+            break
+    if previous_exit_state:
+        EXIT.set()
+    else:
+        EXIT.clear()
+
+
+@pytest.fixture
+def kafka_admin_client(kafka_settings):
+    deadline = time.time() + 15.0
+    client = None
+    while time.time() < deadline:
+        try:
+            client = KafkaAdminClient(
+                bootstrap_servers=kafka_settings.bootstrap_servers,
+            )
+            client.list_topics()
+            break
+        except NoBrokersAvailable:
+            time.sleep(0.5)
+    if client is None:
+        client = KafkaAdminClient(
+            bootstrap_servers=kafka_settings.bootstrap_servers,
+        )
+        client.list_topics()
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def kafka_topic_name():
+    return f'pgwal.topic.{uuid.uuid4().hex}'
+
+
+@pytest.fixture
+def kafka_topic(kafka_admin_client, kafka_topic_name):
+    try:
+        kafka_admin_client.create_topics(
+            [NewTopic(name=kafka_topic_name, num_partitions=1, replication_factor=1)]
+        )
+    except TopicAlreadyExistsError:
+        pass
+    return kafka_topic_name
+
+
+@pytest.fixture
+def kafka_consumer(kafka_settings, kafka_topic):
+    consumer = KafkaConsumer(
+        kafka_topic,
+        bootstrap_servers=kafka_settings.bootstrap_servers,
+        auto_offset_reset='earliest',
+        enable_auto_commit=False,
+        group_id=f'pgwal-tests-{uuid.uuid4().hex}',
+        consumer_timeout_ms=1000,
+        value_deserializer=lambda value: value.decode('utf8'),
+    )
+    yield consumer
+    consumer.close()
+
+
+@pytest.fixture
+def kafka_publisher(kafka_settings, kafka_topic):
+    previous_exit_state = EXIT.is_set()
+    EXIT.set()
+    while True:
+        try:
+            KafkaPublisher._MSG_QUEUE.get_nowait()
+        except Empty:
+            break
+
+    publisher = KafkaPublisher(
+        kafka_topic,
+        bootstrap_servers=kafka_settings.bootstrap_servers,
+    )
+    publisher.topic_name = kafka_topic
+
+    def _publish_payload(payload, timeout: float = 10.0):
+        previous_sent = publisher._sent
+        publisher.publish(KafkaPayloadMessage(payload))
+        deadline = time.time() + timeout
+        while publisher._sent == previous_sent and time.time() < deadline:
+            time.sleep(0.1)
+        if publisher._sent == previous_sent:
+            raise AssertionError('timed out waiting for KafkaPublisher to send message')
+        publisher.flush(timeout)
+
+    publisher.publish_payload = _publish_payload
+
+    yield publisher
+
+    publisher.stop()
+    EXIT.clear()
+    time.sleep(publisher._PUBLISH_INTERVAL + 0.2)
+    while True:
+        try:
+            KafkaPublisher._MSG_QUEUE.get_nowait()
         except Empty:
             break
     if previous_exit_state:
