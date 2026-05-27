@@ -106,6 +106,17 @@ bootstrap_psql_test:
 		-d $(TEST_DB_NAME) \
 		-c "ALTER ROLE $(TEST_DB_USER) WITH REPLICATION;"
 
+.PHONY: ensure_psql_test
+ensure_psql_test:
+	@if docker inspect $(TEST_DB_CONTAINER) >/dev/null 2>&1; then \
+		$(MAKE) wait_psql_test; \
+		$(MAKE) bootstrap_psql_test; \
+	else \
+		$(MAKE) run_psql_test; \
+		$(MAKE) wait_psql_test; \
+		$(MAKE) bootstrap_psql_test; \
+	fi
+
 .PHONY: test
 test:
 	/bin/bash -c "TEST_RABBITMQ_HOST=$(TEST_RABBITMQ_HOST) TEST_RABBITMQ_PORT=$(TEST_RABBITMQ_PORT) TEST_RABBITMQ_USER=$(TEST_RABBITMQ_USER) TEST_RABBITMQ_PASSWORD=$(TEST_RABBITMQ_PASSWORD) TEST_RABBITMQ_VHOST=$(TEST_RABBITMQ_VHOST) TEST_KAFKA_HOST=$(TEST_KAFKA_HOST) TEST_KAFKA_PORT=$(TEST_KAFKA_PORT) python -m coverage run -m pytest;make clean"
@@ -123,6 +134,10 @@ cov_report:
 .PHONY: run_tests
 run_tests: run_psql_test wait_psql_test bootstrap_psql_test run_rabbitmq_test wait_rabbitmq_test run_kafka_test wait_kafka_test
 	make test && make cov_report
+
+.PHONY: run_e2e
+run_e2e: ensure_psql_test
+	python -m scripts.run_e2e --publishers "$(E2E_PUBLISHERS)" --consumer-workers "$(or $(E2E_CONSUMER_WORKERS),1)" --env-file "$(or $(E2E_ENV_FILE),.local/.env)"
 
 .PHONY: update_docs_structure
 update_docs_structure:
