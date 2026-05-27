@@ -137,7 +137,7 @@ run_tests: run_psql_test wait_psql_test bootstrap_psql_test run_rabbitmq_test wa
 
 .PHONY: run_e2e
 run_e2e: ensure_psql_test
-	python scripts/run_e2e.py --publishers "$(E2E_PUBLISHERS)" --consumer-workers "$(or $(E2E_CONSUMER_WORKERS),1)" --env-file "$(or $(E2E_ENV_FILE),.local/.env)"
+	python -m scripts.run_e2e --publishers "$(E2E_PUBLISHERS)" --consumer-workers "$(or $(E2E_CONSUMER_WORKERS),1)" --env-file "$(or $(E2E_ENV_FILE),.local/.env)"
 
 .PHONY: update_docs_structure
 update_docs_structure:

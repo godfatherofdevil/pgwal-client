@@ -1,11 +1,8 @@
 """Run an on-demand end-to-end PGWAL flow against real destinations."""
 from __future__ import annotations
 
-# pylint: disable=wrong-import-position
-
 import argparse
 import os
-from pathlib import Path
 import sys
 import threading
 import time
@@ -18,15 +15,12 @@ from kafka.errors import NoBrokersAvailable, TopicAlreadyExistsError
 import pika
 import psycopg2
 from psycopg2.extras import LogicalReplicationConnection
+from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from pgwal.app import PGWAL  # noqa: E402
-from pgwal.consumers import ConsumerState, WALConsumer  # noqa: E402
-from pgwal.interface import WALReplicationOpts, WALReplicationValues  # noqa: E402
-from pgwal.publishers import KafkaPublisher, RabbitPublisher  # noqa: E402
+from pgwal.app import PGWAL
+from pgwal.consumers import ConsumerState, WALConsumer
+from pgwal.interface import WALReplicationOpts, WALReplicationValues
+from pgwal.publishers import KafkaPublisher, RabbitPublisher
 
 
 class E2EError(RuntimeError):
@@ -120,22 +114,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_env_file(path: str) -> None:
-    """Load KEY=VALUE pairs without overriding existing environment variables."""
-    env_path = Path(path)
-    if not env_path.exists():
-        return
-    for raw_line in env_path.read_text(encoding='utf8').splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith('#'):
-            continue
-        if line.startswith('export '):
-            line = line[len('export ') :].strip()
-        key, separator, value = line.partition('=')
-        if not separator:
-            continue
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+    """Load environment values from a dotenv file when it exists."""
+    load_dotenv(path, override=False)
 
 
 def get_env(name: str, default: str) -> str:
