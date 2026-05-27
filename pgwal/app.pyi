@@ -1,7 +1,8 @@
 import threading
 from .consumers import WALConsumer as WALConsumer
+from .events import EXIT as EXIT
 from .publishers.base import BasePublisher as BasePublisher
-from _typeshed import Incomplete as Incomplete
+from _typeshed import Incomplete
 from functools import cached_property as cached_property
 from psycopg2.extras import LogicalReplicationConnection
 from psycopg2.pool import ThreadedConnectionPool
@@ -11,6 +12,8 @@ POOL_MAX: int
 logger: Incomplete
 
 class PGWAL:
+    _pool: ThreadedConnectionPool | None
+    def _consume(self, consumer: 'WALConsumer') -> None: ...
     dsn: Incomplete
     tasks: list[threading.Thread]
     publishers: list['BasePublisher']

@@ -1,11 +1,19 @@
+from .events import EXIT as EXIT
 from .interface import WALReplicationOpts as WALReplicationOpts
 from .publishers.base import BasePublisher as BasePublisher
-from _typeshed import Incomplete as Incomplete
+from _typeshed import Incomplete
 from psycopg2.extras import ReplicationCursor, ReplicationMessage
 
 logger: Incomplete
 
 class WALConsumer:
+    _lock: Incomplete
+    _STATUS_INTERVAL: float
+    _consuming: bool
+    def _consume(self, msg: 'ReplicationMessage') -> None: ...
+    def _msg_n_consumed(self, cursor: 'ReplicationCursor') -> bool: ...
+    def _get_cur_timeout(self, cursor: 'ReplicationCursor') -> float: ...
+    def _wait_on_repl_cursor(self, cursor: 'ReplicationCursor') -> None: ...
     replication_slot: Incomplete
     replication_opts: Incomplete
     publishers: Incomplete

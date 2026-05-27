@@ -191,8 +191,8 @@ Implemented destinations:
                                   | Publisher execution model                                            |
                                   |----------------------------------------------------------------------|
                                   | ShellPublisher   : no worker thread; logs inline                    |
-                                  | RabbitPublisher  : daemon thread + pika ioloop + internal queue     |
-                                  | KafkaPublisher   : daemon thread + poll/sleep loop + internal queue |
+                                  | RabbitPublisher  : tracked worker thread + pika ioloop + queue      |
+                                  | KafkaPublisher   : tracked worker thread + poll/sleep loop + queue  |
                                   +-----------------------------------------------------------------------+
 ```
 
@@ -245,7 +245,7 @@ RabbitPublisher.publish(msg)
     |
     +--> ensure_running()
     |     |
-    |     +--> start daemon thread if not already running
+    |     +--> start tracked worker thread if not already running
     |
     +--> msg_queue.put_nowait(msg.payload)
           |
@@ -266,6 +266,18 @@ RabbitPublisher.publish(msg)
                     |
                     v
                  RabbitMQ exchange -> queue -> downstream consumers
+
+Shutdown path
+    |
+    +--> stop()
+    |     |
+    |     +--> mark publisher stopping
+    |     +--> request channel / connection close on pika ioloop thread
+    |
+    +--> wait_stopped(timeout)
+          |
+          +--> join tracked worker thread
+          +--> return only after RabbitPublisher.run() exits
 ```
 
 ### Kafka
@@ -352,7 +364,7 @@ User config
           v                                       v
 +---------+-----------+               +-----------+---------+
 | close_pool()        |               | stop_publishers()   |
-| close DB conns      |               | flush / close sink  |
+| close DB conns      |               | stop + wait sink    |
 +---------+-----------+               +-----------+---------+
           |                                       |
           v                                       v
@@ -395,9 +407,9 @@ pgwal/app.py                  -> PGWAL process, pool, thread orchestration
 pgwal/consumers.py            -> replication consumption loop
 pgwal/interface.py            -> wal2json replication option model
 pgwal/events.py               -> global EXIT event
-pgwal/publishers/base.py      -> publisher lifecycle + queue mixin
+pgwal/publishers/base.py      -> publisher lifecycle, worker tracking, queue mixin
 pgwal/publishers/shell.py     -> local logging sink
-pgwal/publishers/rabbitmq.py  -> RabbitMQ sink
+pgwal/publishers/rabbitmq.py  -> RabbitMQ sink + deterministic ioloop shutdown
 pgwal/publishers/kafka.py     -> Kafka sink
 tests/test_consumers.py       -> feedback + cursor loop behavior
 tests/test_rabbitmq_publisher.py

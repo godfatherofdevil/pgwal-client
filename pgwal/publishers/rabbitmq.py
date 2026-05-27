@@ -9,6 +9,7 @@ from queue import SimpleQueue
 from typing import TYPE_CHECKING, Any
 
 import pika
+from pika.adapters.select_connection import IOLoop
 from pika.exchange_type import ExchangeType
 
 from .base import (
@@ -52,6 +53,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         """
         self._connection: pika.SelectConnection | None = None
         self._channel: Any = None
+        self._ioloop: IOLoop | None = None
 
         self._deliveries: dict[int, bool] | None = None
         self._acked: int | None = None
@@ -65,6 +67,8 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         self._routing_key = routing_key
         self._exchange_type = exchange_type
         self._ready = threading.Event()
+        self._stopped = threading.Event()
+        self._stopped.set()
         self.msg_headers: dict[str, object] = {}
 
     @property
@@ -86,11 +90,14 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
 
         """
         logger.info('Connecting to %s', self._url)
+        if self._ioloop is None:
+            self._ioloop = IOLoop()
         return pika.SelectConnection(
             pika.URLParameters(self._url),
             on_open_callback=self.on_connection_open,
             on_open_error_callback=self.on_connection_open_error,
             on_close_callback=self.on_connection_closed,
+            custom_ioloop=self._ioloop,
         )
 
     def on_connection_open(self, _unused_connection: object) -> None:
@@ -187,7 +194,13 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         logger.warning('Channel %i was closed: %s', channel, reason)
         self._channel = None
         self._ready.clear()
-        if not self._stopping or not EXIT.is_set():
+        if self._stopping:
+            if self._connection is not None and self._connection.is_open:
+                self.close_connection()
+            elif self._connection is not None:
+                self._connection.ioloop.stop()
+            return
+        if not EXIT.is_set():
             self.close_connection()
 
     def setup_exchange(self, exchange_name: str) -> None:
@@ -379,22 +392,39 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         """Run the publisher by connecting and then starting the IOLoop."""
         self.set_running(True)
         self._ready.clear()
-        while not self._stopping:
-            # This is just an insurance to break from the ioloop when we need to exit
-            if not EXIT.is_set():
-                logger.warning(
-                    'Received EXIT event, breaking from the RabbitMQ connection loop.'
-                )
-                break
+        self._stopped.clear()
+        try:
+            while not self._stopping:
+                # This is just an insurance to break from the ioloop when we need to exit
+                if not EXIT.is_set():
+                    logger.warning(
+                        'Received EXIT event, breaking from the RabbitMQ connection loop.'
+                    )
+                    break
+                self._connection = None
+                self._deliveries = {}
+                self._acked = 0
+                self._nacked = 0
+                self._message_number = 0
+                self._ioloop = IOLoop()
+                self._connection = self.connect()
+                ioloop = self._ioloop
+                if self._stopping:
+                    self._request_shutdown()
+                try:
+                    if ioloop is not None:
+                        ioloop.start()
+                finally:
+                    if ioloop is not None:
+                        ioloop.close()
+        finally:
+            self._channel = None
             self._connection = None
-            self._deliveries = {}
-            self._acked = 0
-            self._nacked = 0
-            self._message_number = 0
-            self._connection = self.connect()
-            self._connection.ioloop.start()
-
-        logger.info('Stopped')
+            self._ioloop = None
+            self._ready.clear()
+            self.set_running(False)
+            self._stopped.set()
+            logger.info('Stopped')
 
     def stop(self) -> None:
         """Stop the publisher by closing the channel and connection. We
@@ -406,11 +436,9 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
 
         """
         logger.info('Stopping')
-        self.set_running(False)
         self._stopping = True
         self._ready.clear()
-        self.close_channel()
-        self.close_connection()
+        self._request_shutdown()
 
     def close_channel(self) -> None:
         """Invoke this command to close the channel with RabbitMQ by sending
@@ -432,6 +460,34 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
             else:
                 logger.info('Closing connection')
                 self._connection.close()
+
+    def _close_from_ioloop(self) -> None:
+        """Close broker resources from the pika IOLoop thread."""
+        self._ready.clear()
+        if self._channel is not None and self._channel.is_open:
+            self.close_channel()
+            return
+        if self._connection is not None and self._connection.is_open:
+            self.close_connection()
+            return
+        if self._connection is not None:
+            self._connection.ioloop.stop()
+
+    def _request_shutdown(self) -> None:
+        """Request shutdown using the broker loop when available."""
+        connection = self._connection
+        if connection is None:
+            return
+        try:
+            connection.ioloop.add_callback_threadsafe(self._close_from_ioloop)
+        except Exception:  # pragma: no cover - defensive fallback for adapter state
+            self._close_from_ioloop()
+
+    def wait_stopped(self, timeout: float | None = None) -> bool:
+        """Wait for the RabbitMQ worker to stop completely."""
+        if not super().wait_stopped(timeout):
+            return False
+        return self._stopped.wait(timeout)
 
     @ensure_running
     def publish(self, msg: 'ReplicationMessage') -> None:

@@ -232,13 +232,8 @@ def rabbit_publisher(rabbitmq_settings):
     yield publisher
 
     publisher.stop()
-    deadline = time.time() + 10.0
-    while (
-        publisher._connection is not None
-        and publisher._connection.is_open
-        and time.time() < deadline
-    ):
-        time.sleep(0.1)
+    if not publisher.wait_stopped(timeout=10.0):
+        raise AssertionError('timed out waiting for RabbitPublisher shutdown')
     while True:
         try:
             publisher.msg_queue.get_nowait()

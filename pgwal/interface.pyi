@@ -1,5 +1,7 @@
+from .errors import InvalidReplicationAction as InvalidReplicationAction
 from enum import Enum
 from pydantic import BaseModel
+
 
 class WALReplicationValues(str, Enum):
     zero = '0'

@@ -21,10 +21,8 @@ R = TypeVar('R')
 
 
 def run_publisher_daemon(publisher: 'BasePublisher') -> None:
-    """Run publisher in a demon thread."""
-    task = threading.Thread(target=publisher.run)
-    task.daemon = True
-    task.start()
+    """Run publisher in a tracked daemon thread if one is not active."""
+    publisher.start_worker()
 
 
 def ensure_running(
@@ -70,6 +68,8 @@ class BasePublisher(metaclass=abc.ABCMeta):
 
     _lock: threading.Lock | None = None
     _running = False
+    _thread: threading.Thread | None = None
+    _thread_lock: threading.Lock | None = None
 
     @abc.abstractmethod
     def publish(self, msg: 'ReplicationMessage') -> None:
@@ -93,3 +93,43 @@ class BasePublisher(metaclass=abc.ABCMeta):
         if self._lock is not None:
             with self._lock:
                 self._running = value
+        else:
+            self._running = value
+
+    def _get_thread_lock(self) -> threading.Lock:
+        """Get or create the per-instance worker-thread lock."""
+        thread_lock = self._thread_lock
+        if thread_lock is None:
+            thread_lock = threading.Lock()
+            self._thread_lock = thread_lock
+        return thread_lock
+
+    def start_worker(self) -> threading.Thread:
+        """Start the publisher worker thread if it is not already running."""
+        with self._get_thread_lock():
+            task = self._thread
+            if task is not None and task.is_alive():
+                return task
+            task = threading.Thread(
+                target=self.run,
+                name=f'{self.__class__.__name__}-worker',
+                daemon=True,
+            )
+            self._thread = task
+            task.start()
+            return task
+
+    def wait_stopped(self, timeout: float | None = None) -> bool:
+        """Wait for the tracked worker thread to stop."""
+        task = self._thread
+        if task is None:
+            return True
+        if task is threading.current_thread():
+            return False
+        task.join(timeout)
+        stopped = not task.is_alive()
+        if stopped:
+            with self._get_thread_lock():
+                if self._thread is task:
+                    self._thread = None
+        return stopped

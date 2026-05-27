@@ -4,6 +4,15 @@ import json
 import time
 
 import pika
+import pytest
+from pgwal.events import EXIT
+from pgwal.publishers.rabbitmq import RabbitPublisher
+
+
+@pytest.fixture(scope='session', autouse=True)
+def db_conn():
+    """Override the global Postgres fixture for broker-only Rabbit tests."""
+    yield None
 
 
 def _read_one(connection, queue_name: str, timeout: float = 10.0) -> str:
@@ -95,13 +104,74 @@ def test_rabbit_publisher_delivers_multiple_messages_in_order(
 
 def test_rabbit_publisher_stop_closes_connection(rabbit_publisher):
     rabbit_publisher.publish_payload('shutdown-check')
+    rabbit_publisher.wait_until_ready()
 
     rabbit_publisher.stop()
+    assert rabbit_publisher.wait_stopped(timeout=10.0)
 
     assert rabbit_publisher._stopping is True
     assert not rabbit_publisher.is_running()
+    assert rabbit_publisher._thread is None
     if rabbit_publisher._connection is not None:
-        deadline = time.time() + 10.0
-        while time.time() < deadline and rabbit_publisher._connection.is_open:
-            time.sleep(0.1)
         assert not rabbit_publisher._connection.is_open
+
+
+def test_rabbit_publisher_run_closes_ioloop(monkeypatch):
+    class FakeIOLoop:
+        def __init__(self):
+            self.started = False
+            self.closed = False
+
+        def start(self):
+            self.started = True
+            publisher._stopping = True
+
+        def close(self):
+            self.closed = True
+
+        def add_callback_threadsafe(self, callback):
+            callback()
+
+    class FakeConnection:
+        def __init__(self, ioloop):
+            self.ioloop = ioloop
+            self.is_open = False
+            self.is_closing = False
+
+        def close(self):
+            self.is_open = False
+
+    loops = []
+
+    def _fake_ioloop():
+        loop = FakeIOLoop()
+        loops.append(loop)
+        return loop
+
+    publisher = RabbitPublisher(
+        'amqp://tests:secret@localhost:5672/%2F',
+        exchange='pgwal.exchange.test',
+        queue='pgwal.queue.test',
+        routing_key='pgwal.route.test',
+    )
+
+    monkeypatch.setattr('pgwal.publishers.rabbitmq.IOLoop', _fake_ioloop)
+
+    def _fake_connect():
+        return FakeConnection(publisher._ioloop)
+
+    monkeypatch.setattr(publisher, 'connect', _fake_connect)
+
+    previous_exit_state = EXIT.is_set()
+    EXIT.set()
+    try:
+        publisher.run()
+    finally:
+        if previous_exit_state:
+            EXIT.set()
+        else:
+            EXIT.clear()
+
+    assert loops
+    assert loops[0].started is True
+    assert loops[0].closed is True
