@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from mypy import stubgen
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -113,7 +114,9 @@ def _collect_parameter_annotations(function: ast.FunctionDef) -> dict[str, str]:
     return annotations
 
 
-def _collect_class_attributes(class_node: ast.ClassDef) -> list[StubAttribute]:
+def _collect_class_attributes(  # pylint: disable=too-many-branches
+    class_node: ast.ClassDef,
+) -> list[StubAttribute]:
     """Collect class and instance attributes declared in source."""
     attributes: dict[str, StubAttribute] = {}
     order: list[str] = []
@@ -501,7 +504,7 @@ def _is_enum_like_class(
     return False
 
 
-def _normalize_empty_enum_stubs(
+def _normalize_empty_enum_stubs(  # pylint: disable=too-many-locals
     source_tree: ast.Module,
     stub_tree: ast.Module,
     stub_lines: list[str],
@@ -552,7 +555,7 @@ def _normalize_empty_enum_stubs(
         del stub_lines[index]
 
 
-def _enrich_stub_text(
+def _enrich_stub_text(  # pylint: disable=too-many-locals
     source_text: str,
     stub_text: str,
     source_path: Path | None = None,
@@ -614,7 +617,8 @@ def _enrich_stub_text(
                     defined_names,
                 )
                 if method.name not in existing_members
-                and method.name not in {local_method.name for local_method in local_methods}
+                and method.name
+                not in {local_method.name for local_method in local_methods}
             ]
         if not missing_attributes and not local_methods and not inherited_methods:
             continue
@@ -654,7 +658,6 @@ def _copy_package_sources(source_root: Path) -> Path:
 
 
 def _run_stubgen(source_package_dir: Path, output_dir: Path) -> None:
-    from mypy import stubgen
 
     stubgen.main(
         [

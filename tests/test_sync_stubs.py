@@ -1,4 +1,5 @@
 """Tests for stub synchronization helpers."""
+# pylint:disable=C0103,C0116
 from __future__ import annotations
 
 import importlib.util

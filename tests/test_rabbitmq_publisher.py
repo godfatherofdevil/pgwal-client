@@ -1,4 +1,4 @@
-# pylint:disable=C0103,C0116
+# pylint:disable=C0103,C0115,C0116
 """RabbitPublisher integration tests."""
 import json
 import time
