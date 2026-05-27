@@ -1,68 +1,85 @@
-"""Postgres WAL consumers module"""
+"""Postgres WAL consumers module."""
 from __future__ import annotations
 
-import threading
 from datetime import datetime
+from enum import Enum
 import logging
 from select import select
+import threading
 from typing import TYPE_CHECKING, cast
+
 import psycopg2
 
-from .events import EXIT
-from .interface import WALReplicationOpts
-
 if TYPE_CHECKING:
-    from psycopg2.extras import (
-        ReplicationCursor,
-        ReplicationMessage,
-    )
-    from .publishers.base import BasePublisher
+    from psycopg2.extras import ReplicationCursor, ReplicationMessage
 
+    from .publishers.base import BasePublisher
 
 logger = logging.getLogger(__name__)
 
 
-class WALConsumer:
-    """Base WAL Stream consumer or subscriber."""
+class ConsumerState(str, Enum):
+    """Consumer lifecycle state."""
 
-    _lock = threading.Lock()
+    IDLE = 'idle'
+    STARTING = 'starting'
+    RUNNING = 'running'
+    STOPPING = 'stopping'
+    STOPPED = 'stopped'
+    FAILED = 'failed'
+
+
+class WALConsumer:
+    """Base WAL stream consumer."""
+
     _STATUS_INTERVAL = 10.0
 
     def __init__(
         self,
         replication_slot: str,
-        replication_opts: WALReplicationOpts,
+        replication_opts: object,
         publishers: list['BasePublisher'] | None = None,
     ) -> None:
         self.replication_slot = replication_slot
         self.replication_opts = replication_opts
         self.publishers = publishers or []
-        # Flag to indicate if consuming from server or not
-        self._consuming = False
-
-    def set_consuming(self, value: bool) -> None:
-        """Set _consuming flag"""
-        with self._lock:
-            self._consuming = value
+        self._stop_event = threading.Event()
+        self._state = ConsumerState.IDLE
+        self._last_error: str | None = None
 
     @property
-    def consuming(self) -> bool:
-        """Whether consuming or not"""
-        return self._consuming
+    def state(self) -> ConsumerState:
+        """Consumer lifecycle state."""
+        return self._state
+
+    def set_state(self, value: ConsumerState) -> None:
+        """Set consumer state."""
+        self._state = value
+
+    @property
+    def last_error(self) -> str | None:
+        """Last consumer error."""
+        return self._last_error
+
+    @property
+    def stop_event(self) -> threading.Event:
+        """Per-consumer stop event."""
+        return self._stop_event
 
     def stop(self) -> None:
-        """Stop this consumer"""
-        self.set_consuming(False)
+        """Stop this consumer."""
+        self.set_state(ConsumerState.STOPPING)
+        self._stop_event.set()
 
     @property
     def output_plugin(self) -> str:
-        """Output plugin to decode WAL stream."""
+        """Output plugin used to decode the WAL stream."""
         return 'wal2json'
 
     def start_replication(self, cursor: 'ReplicationCursor') -> None:
-        """Start replication stream"""
+        """Start the replication stream."""
         logger.debug(
-            'Consumer %s, Starting the replication slot %s',
+            'Consumer %s starting replication slot %s',
             id(self),
             self.replication_slot,
         )
@@ -78,22 +95,28 @@ class WALConsumer:
             )
         except psycopg2.OperationalError:
             logger.warning(
-                'Replication Slot %s has already started on this cursor',
+                'Replication slot %s has already started on this cursor',
                 self.replication_slot,
             )
 
-    def _consume(self, msg: 'ReplicationMessage') -> None:
-        """Consume one message and publish to all configured publishers"""
+    def _publish_to_all(self, msg: 'ReplicationMessage') -> bool:
+        """Publish one message to all configured publishers."""
         for publisher in self.publishers:
-            publisher.publish(msg)
+            result = publisher.publish(msg)
+            if not result.accepted:
+                self._last_error = result.reason
+                self.set_state(ConsumerState.FAILED)
+                return False
+        return True
+
+    def _consume(self, msg: 'ReplicationMessage') -> None:
+        """Consume one message and advance feedback on successful handoff."""
+        if not self._publish_to_all(msg):
+            return
         msg.cursor.send_feedback(flush_lsn=msg.data_start)
 
     def _msg_n_consumed(self, cursor: 'ReplicationCursor') -> bool:
-        """
-        Consume if message otherwise return
-        :param cursor: replication cursor
-        :return bool: True if there is a message to consume otherwise False
-        """
+        """Consume a message if available."""
         msg = cursor.read_message()
         if not msg:
             return False
@@ -101,7 +124,7 @@ class WALConsumer:
         return True
 
     def _get_cur_timeout(self, cursor: 'ReplicationCursor') -> float:
-        """Calculate and return the cursor timeout"""
+        """Calculate cursor timeout."""
         feedback_timestamp = cast(datetime | None, cursor.feedback_timestamp)
         if feedback_timestamp is None:
             return -1.0
@@ -111,36 +134,34 @@ class WALConsumer:
         )
 
     def _wait_on_repl_cursor(self, cursor: 'ReplicationCursor') -> None:
-        """Wait on cursor for a message or timeout and recalculate timeout and continue"""
+        """Wait on cursor activity or timeout."""
         timeout = self._get_cur_timeout(cursor)
         try:
             select([cursor], [], [], max(0, int(timeout)))
         except InterruptedError:
-            pass  # recalculate timeout and continue
+            pass
 
     def consume_async(self, cursor: 'ReplicationCursor') -> None:
-        """Consume WAL stream without blocking"""
+        """Consume the WAL stream until the consumer is stopped."""
+        self.set_state(ConsumerState.STARTING)
         self.start_replication(cursor)
-        while True:
-            if not EXIT.is_set():
-                logger.warning('Received EXIT event. breaking from the consuming loop')
-                self.stop()
-                break
+        self.set_state(ConsumerState.RUNNING)
+        while not self.stop_event.is_set():
             if cursor.closed:
-                logger.warning('Cursor is already closed. returning!!!')
+                logger.warning('Cursor is already closed, returning')
+                self.set_state(ConsumerState.STOPPED)
                 return
-            self.set_consuming(True)
             if self._msg_n_consumed(cursor):
+                if self.state is ConsumerState.FAILED:
+                    return
                 continue
             self._wait_on_repl_cursor(cursor)
+        self.set_state(ConsumerState.STOPPED)
 
     def consume_sync(self, cursor: 'ReplicationCursor') -> None:
-        """Consume WAL stream and block till new messages arrive"""
+        """Consume WAL stream synchronously."""
         cursor.consume_stream(self)
 
     def __call__(self, msg: 'ReplicationMessage') -> None:
-        """
-        callback to ReplicationCursor.consume_stream,
-        for more details https://www.psycopg.org/docs/extras.html#psycopg2.extras.ReplicationCursor.consume_stream
-        """
+        """Callback for `ReplicationCursor.consume_stream`."""
         self._consume(msg)

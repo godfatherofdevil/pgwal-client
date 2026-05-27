@@ -1,11 +1,11 @@
-"""RabbitMQ Publisher"""
-# pylint: disable=R0902,C0103, R0904
+"""RabbitMQ publisher."""
+# pylint: disable=R0902,R0904
 from __future__ import annotations
 
 import functools
 import logging
+from queue import Queue
 import threading
-from queue import SimpleQueue
 from typing import TYPE_CHECKING, Any
 
 import pika
@@ -15,23 +15,21 @@ from pika.exchange_type import ExchangeType
 from .base import (
     BasePublisher,
     MsgQueueMixin,
+    PublishResult,
     PublisherMessage,
+    PublisherState,
     ensure_running,
 )
-from ..events import EXIT
 
 if TYPE_CHECKING:
     from psycopg2.extras import ReplicationMessage
-
 
 logger = logging.getLogger(__name__)
 
 
 class RabbitPublisher(BasePublisher, MsgQueueMixin):
-    """A Publisher that sends the replication message to RabbitMQ"""
+    """A publisher that sends replication messages to RabbitMQ."""
 
-    _lock = threading.Lock()
-    _MSG_QUEUE = SimpleQueue()
     _PUBLISH_INTERVAL = 0.5
     _NAME = 'publisher:RabbitPublisher'
 
@@ -42,24 +40,16 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         queue: str,
         routing_key: str,
         exchange_type: ExchangeType = ExchangeType.topic,
+        queue_size: int = 1000,
     ) -> None:
-        """
-        Set up the RabbitPublisher object with required connection url, exchange, queue and routing_key
-        :param str amqp_url: The URL for connecting to RabbitMQ
-        :param exchange: exchange to which we should bind
-        :param queue: queue to which we should bind
-        :param routing_key: routing key for the message
-        :param exchange_type
-        """
+        super().__init__()
         self._connection: pika.SelectConnection | None = None
         self._channel: Any = None
         self._ioloop: IOLoop | None = None
-
-        self._deliveries: dict[int, bool] | None = None
-        self._acked: int | None = None
-        self._nacked: int | None = None
-        self._message_number: int | None = None
-
+        self._deliveries: dict[int, bool] = {}
+        self._acked = 0
+        self._nacked = 0
+        self._message_number = 0
         self._stopping = False
         self._url = amqp_url
         self._exchange = exchange
@@ -67,9 +57,8 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         self._routing_key = routing_key
         self._exchange_type = exchange_type
         self._ready = threading.Event()
-        self._stopped = threading.Event()
-        self._stopped.set()
         self.msg_headers: dict[str, object] = {}
+        self._msg_queue: Queue[PublisherMessage] = Queue(maxsize=queue_size)
 
     @property
     def ready(self) -> threading.Event:
@@ -77,18 +66,12 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         return self._ready
 
     @property
-    def msg_queue(self) -> SimpleQueue[PublisherMessage]:
-        """return internal message queue to use"""
-        return self._MSG_QUEUE
+    def msg_queue(self) -> Queue[PublisherMessage]:
+        """Return internal queue."""
+        return self._msg_queue
 
     def connect(self) -> pika.SelectConnection:
-        """This method connects to RabbitMQ, returning the connection handle.
-        When the connection is established, the on_connection_open method
-        will be invoked by pika.
-
-        :rtype: pika.SelectConnection
-
-        """
+        """Connect to RabbitMQ."""
         logger.info('Connecting to %s', self._url)
         if self._ioloop is None:
             self._ioloop = IOLoop()
@@ -101,14 +84,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         )
 
     def on_connection_open(self, _unused_connection: object) -> None:
-        """This method is called by pika once the connection to RabbitMQ has
-        been established. It passes the handle to the connection object in
-        case we need it, but in this case, we'll just mark it unused.
-
-        :param pika.SelectConnection _unused_connection: The connection
-
-        """
-        logger.info('Connection opened')
+        """Handle open connection."""
         self.open_channel()
 
     def on_connection_open_error(
@@ -116,82 +92,46 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         _unused_connection: object,
         err: Exception,
     ) -> None:
-        """This method is called by pika if the connection to RabbitMQ
-        can't be established.
-
-        :param pika.SelectConnection _unused_connection: The connection
-        :param Exception err: The error
-
-        """
-        logger.error('Connection open failed, reopening in 5 seconds: %s', err)
+        """Handle connection open failure."""
+        self._metrics.reconnect_count += 1
+        self.mark_error(err)
         if self._connection is not None:
             self._connection.ioloop.call_later(5, self._connection.ioloop.stop)
 
     def on_connection_closed(
-        self, _unused_connection: object, reason: Exception
+        self,
+        _unused_connection: object,
+        reason: Exception,
     ) -> None:
-        """This method is invoked by pika when the connection to RabbitMQ is
-        closed unexpectedly. Since it is unexpected, we will reconnect to
-        RabbitMQ if it disconnects.
-
-        :param pika.connection.Connection connection: The closed connection obj
-        :param Exception reason: exception representing reason for loss of
-            connection.
-
-        """
+        """Handle connection closed."""
         self._channel = None
         self._ready.clear()
         if self._stopping and self._connection is not None:
             self._connection.ioloop.stop()
-        elif self._connection is not None:
-            logger.warning('Connection closed, reopening in 5 seconds: %s', reason)
+            return
+        self._metrics.reconnect_count += 1
+        self.mark_error(reason)
+        if self._connection is not None:
             self._connection.ioloop.call_later(5, self._connection.ioloop.stop)
 
     def open_channel(self) -> None:
-        """This method will open a new channel with RabbitMQ by issuing the
-        Channel.Open RPC command. When RabbitMQ confirms the channel is open
-        by sending the Channel.OpenOK RPC reply, the on_channel_open method
-        will be invoked.
-
-        """
-        logger.info('Creating a new channel')
+        """Open RabbitMQ channel."""
         if self._connection is not None:
             self._connection.channel(on_open_callback=self.on_channel_open)
 
     def on_channel_open(self, channel: Any) -> None:
-        """This method is invoked by pika when the channel has been opened.
-        The channel object is passed in so we can make use of it.
-
-        Since the channel is now open, we'll declare the exchange to use.
-
-        :param pika.channel.Channel channel: The channel object
-
-        """
-        logger.info('Channel opened')
+        """Handle opened channel."""
         self._channel = channel
         self.add_on_channel_close_callback()
         self.setup_exchange(self._exchange)
 
     def add_on_channel_close_callback(self) -> None:
-        """This method tells pika to call the on_channel_closed method if
-        RabbitMQ unexpectedly closes the channel.
-
-        """
-        logger.info('Adding channel close callback')
+        """Watch for unexpected channel close."""
         self._channel.add_on_close_callback(self.on_channel_closed)
 
     def on_channel_closed(self, channel: Any, reason: Exception) -> None:
-        """Invoked by pika when RabbitMQ unexpectedly closes the channel.
-        Channels are usually closed if you attempt to do something that
-        violates the protocol, such as re-declare an exchange or queue with
-        different parameters. In this case, we'll close the connection
-        to shutdown the object.
-
-        :param pika.channel.Channel channel: The closed channel
-        :param Exception reason: why the channel was closed
-
-        """
-        logger.warning('Channel %i was closed: %s', channel, reason)
+        """Handle closed channel."""
+        logger.warning('Channel %s was closed: %s', channel, reason)
         self._channel = None
         self._ready.clear()
         if self._stopping:
@@ -200,45 +140,29 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
             elif self._connection is not None:
                 self._connection.ioloop.stop()
             return
-        if not EXIT.is_set():
+        self.mark_error(reason)
+        if self._connection is not None and self._connection.is_open:
             self.close_connection()
 
     def setup_exchange(self, exchange_name: str) -> None:
-        """Setup the exchange on RabbitMQ by invoking the Exchange.Declare RPC
-        command. When it is complete, the on_exchange_declareok method will
-        be invoked by pika.
-
-        :param str|unicode exchange_name: The name of the exchange to declare
-
-        """
-        logger.info('Declaring exchange %s', exchange_name)
-        # Note: using functools.partial is not required, it is demonstrating
-        # how arbitrary data can be passed to the callback when it is called
-        cb = functools.partial(self.on_exchange_declareok, userdata=exchange_name)
+        """Declare exchange."""
+        callback = functools.partial(
+            self.on_exchange_declareok,
+            userdata=exchange_name,
+        )
         self._channel.exchange_declare(
-            exchange=exchange_name, exchange_type=self._exchange_type, callback=cb
+            exchange=exchange_name,
+            exchange_type=self._exchange_type,
+            callback=callback,
         )
 
     def on_exchange_declareok(self, _unused_frame: object, userdata: str) -> None:
-        """Invoked by pika when RabbitMQ has finished the Exchange.Declare RPC
-        command.
-
-        :param pika.Frame.Method unused_frame: Exchange.DeclareOk response frame
-        :param str|unicode userdata: Extra user data (exchange name)
-
-        """
+        """Handle declared exchange."""
         logger.info('Exchange declared: %s', userdata)
         self.setup_queue(self._queue)
 
     def setup_queue(self, queue_name: str) -> None:
-        """Setup the queue on RabbitMQ by invoking the Queue.Declare RPC
-        command. When it is complete, the on_queue_declareok method will
-        be invoked by pika.
-
-        :param str|unicode queue_name: The name of the queue to declare.
-
-        """
-        logger.info('Declaring queue %s', queue_name)
+        """Declare queue."""
         self._channel.queue_declare(
             queue=queue_name,
             durable=True,
@@ -246,18 +170,7 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         )
 
     def on_queue_declareok(self, _unused_frame: object) -> None:
-        """Method invoked by pika when the Queue.Declare RPC call made in
-        setup_queue has completed. In this method we will bind the queue
-        and exchange together with the routing key by issuing the Queue.Bind
-        RPC command. When this command is complete, the on_bindok method will
-        be invoked by pika.
-
-        :param pika.frame.Method method_frame: The Queue.DeclareOk frame
-
-        """
-        logger.info(
-            'Binding %s to %s with %s', self._exchange, self._queue, self._routing_key
-        )
+        """Handle declared queue."""
         self._channel.queue_bind(
             self._queue,
             self._exchange,
@@ -266,113 +179,56 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
         )
 
     def on_bindok(self, _unused_frame: object) -> None:
-        """This method is invoked by pika when it receives the Queue.BindOk
-        response from RabbitMQ. Since we know we're now setup and bound, it's
-        time to start publishing."""
-        logger.info('Queue bound')
+        """Handle completed queue bind."""
         self._ready.set()
+        self.set_state(PublisherState.RUNNING)
         self.start_publishing()
 
     def start_publishing(self) -> None:
-        """This method will enable delivery confirmations and schedule the
-        first message to be sent to RabbitMQ
-
-        """
-        logger.info('Issuing consumer related RPC commands')
+        """Enable confirms and schedule the publish loop."""
         self.enable_delivery_confirmations()
         self.schedule_next_message()
 
     def enable_delivery_confirmations(self) -> None:
-        """Send the Confirm.Select RPC method to RabbitMQ to enable delivery
-        confirmations on the channel. The only way to turn this off is to close
-        the channel and create a new one.
-
-        When the message is confirmed from RabbitMQ, the
-        on_delivery_confirmation method will be invoked passing in a Basic.Ack
-        or Basic.Nack method from RabbitMQ that will indicate which messages it
-        is confirming or rejecting.
-
-        """
-        logger.info('Issuing Confirm.Select RPC command')
+        """Enable RabbitMQ confirms."""
         self._channel.confirm_delivery(self.on_delivery_confirmation)
 
     def on_delivery_confirmation(self, method_frame: Any) -> None:
-        """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC
-        command, passing in either a Basic.Ack or Basic.Nack frame with
-        the delivery tag of the message that was published. The delivery tag
-        is an integer counter indicating the message number that was sent
-        on the channel via Basic.Publish. Here we're just doing house keeping
-        to keep track of stats and remove message numbers that we expect
-        a delivery confirmation of from the list used to keep track of messages
-        that are pending confirmation.
-
-        :param pika.frame.Method method_frame: Basic.Ack or Basic.Nack frame
-
-        """
+        """Track confirms for health metrics."""
         confirmation_type = method_frame.method.NAME.split('.')[1].lower()
         ack_multiple = method_frame.method.multiple
         delivery_tag = method_frame.method.delivery_tag
-
-        logger.info(
-            'Received %s for delivery tag: %i (multiple: %s)',
-            confirmation_type,
-            delivery_tag,
-            ack_multiple,
-        )
-
-        if confirmation_type == 'ack' and self._acked is not None:
+        if confirmation_type == 'ack':
             self._acked += 1
-        elif confirmation_type == 'nack' and self._nacked is not None:
+            self.mark_success()
+        else:
             self._nacked += 1
-
-        if self._deliveries is None:
-            return
-        del self._deliveries[delivery_tag]
-
-        if ack_multiple and self._acked is not None:
+            self.mark_error('rabbit_delivery_nack')
+        self._deliveries.pop(delivery_tag, None)
+        if ack_multiple:
             for tmp_tag in list(self._deliveries.keys()):
                 if tmp_tag <= delivery_tag:
-                    self._acked += 1
-                    del self._deliveries[tmp_tag]
-        # NOTE: at some point you would check self._deliveries for stale
-        # entries and decide to attempt re-delivery
-
-        logger.info(
-            'Published %i messages, %i have yet to be confirmed, '
-            '%i were acked and %i were nacked',
-            self._message_number,
-            len(self._deliveries),
-            self._acked,
-            self._nacked,
-        )
+                    self._deliveries.pop(tmp_tag, None)
 
     def schedule_next_message(self) -> None:
-        """If we are not closing our connection to RabbitMQ, schedule another
-        message to be delivered in PUBLISH_INTERVAL seconds.
-
-        """
-        logger.info('Scheduling next message for %0.1f seconds', self._PUBLISH_INTERVAL)
-        if self._connection is not None:
+        """Schedule the next publish attempt."""
+        if self._connection is not None and not self._stopping:
             self._connection.ioloop.call_later(
                 self._PUBLISH_INTERVAL,
                 self.publish_message,
             )
 
     def publish_message(self) -> None:
-        """
-        read a message from internal SimpleQueue and if there is message then deliver it to RabbitMQ.
-        If there is no message in the queue, look for a message again in _PUBLISH_INTERVAL seconds.
-        This ensures that we are always looking for a message in the internal queue as long as the connection is open
-        """
+        """Drain one message from the queue and publish it."""
         if self._channel is None or not self._channel.is_open:
+            self.schedule_next_message()
             return
-
         properties = pika.BasicProperties(
             app_id=self._NAME,
             content_type='application/json',
             headers=self.msg_headers,
         )
-        message = self._get_message()
+        message = self._get_message(timeout=0.0)
         if message:
             self._channel.basic_publish(
                 self._exchange,
@@ -380,27 +236,16 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
                 message,
                 properties,
             )
-            if self._message_number is not None and self._deliveries is not None:
-                self._message_number += 1
-                self._deliveries[self._message_number] = True
-                logger.info('Published message # %i', self._message_number)
-        else:
-            logger.info('Nothing to publish, scheduling next message')
+            self._message_number += 1
+            self._deliveries[self._message_number] = True
         self.schedule_next_message()
 
     def run(self) -> None:
-        """Run the publisher by connecting and then starting the IOLoop."""
-        self.set_running(True)
+        """Run the RabbitMQ worker."""
         self._ready.clear()
-        self._stopped.clear()
+        self._stopping = False
         try:
-            while not self._stopping:
-                # This is just an insurance to break from the ioloop when we need to exit
-                if not EXIT.is_set():
-                    logger.warning(
-                        'Received EXIT event, breaking from the RabbitMQ connection loop.'
-                    )
-                    break
+            while not self._stop_event.is_set() and not self._stopping:
                 self._connection = None
                 self._deliveries = {}
                 self._acked = 0
@@ -409,60 +254,42 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
                 self._ioloop = IOLoop()
                 self._connection = self.connect()
                 ioloop = self._ioloop
-                if self._stopping:
-                    self._request_shutdown()
                 try:
                     if ioloop is not None:
                         ioloop.start()
                 finally:
                     if ioloop is not None:
                         ioloop.close()
+                if self._stop_event.is_set() or self._stopping:
+                    break
         finally:
             self._channel = None
             self._connection = None
             self._ioloop = None
             self._ready.clear()
-            self.set_running(False)
+            if self.state is not PublisherState.FAILED:
+                self.set_state(PublisherState.STOPPED)
             self._stopped.set()
-            logger.info('Stopped')
 
-    def stop(self) -> None:
-        """Stop the publisher by closing the channel and connection. We
-        set a flag here so that we stop scheduling new messages to be
-        published. The IOLoop is started because this method is
-        invoked by the Try/Catch below when KeyboardInterrupt is caught.
-        Starting the IOLoop again will allow the publisher to cleanly
-        disconnect from RabbitMQ.
-
-        """
-        logger.info('Stopping')
+    def stop(self, drain: bool = False) -> None:
+        """Stop the RabbitMQ worker."""
         self._stopping = True
         self._ready.clear()
+        super().stop(drain=drain)
         self._request_shutdown()
 
     def close_channel(self) -> None:
-        """Invoke this command to close the channel with RabbitMQ by sending
-        the Channel.Close RPC command.
-
-        """
+        """Close channel if open."""
         if self._channel is not None and self._channel.is_open:
-            if self._channel.is_closing:
-                logger.warning('Channel is already closing.')
-            else:
-                logger.info('Closing the channel')
-                self._channel.close()
+            self._channel.close()
 
     def close_connection(self) -> None:
-        """This method closes the connection to RabbitMQ."""
+        """Close connection if open."""
         if self._connection is not None and self._connection.is_open:
-            if self._connection.is_closing:
-                logger.warning('Connection is already closing.')
-            else:
-                logger.info('Closing connection')
-                self._connection.close()
+            self._connection.close()
 
     def _close_from_ioloop(self) -> None:
-        """Close broker resources from the pika IOLoop thread."""
+        """Close broker resources from the pika loop thread."""
         self._ready.clear()
         if self._channel is not None and self._channel.is_open:
             self.close_channel()
@@ -480,16 +307,10 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
             return
         try:
             connection.ioloop.add_callback_threadsafe(self._close_from_ioloop)
-        except Exception:  # pragma: no cover - defensive fallback for adapter state
+        except Exception:  # pragma: no cover - defensive fallback
             self._close_from_ioloop()
 
-    def wait_stopped(self, timeout: float | None = None) -> bool:
-        """Wait for the RabbitMQ worker to stop completely."""
-        if not super().wait_stopped(timeout):
-            return False
-        return self._stopped.wait(timeout)
-
     @ensure_running
-    def publish(self, msg: 'ReplicationMessage') -> None:
-        """Publish replication message"""
-        self.msg_queue.put_nowait(msg.payload)
+    def publish(self, msg: 'ReplicationMessage') -> PublishResult:
+        """Queue replication message for RabbitMQ delivery."""
+        return self._queue_publish(msg.payload)

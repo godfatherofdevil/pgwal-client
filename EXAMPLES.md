@@ -492,6 +492,73 @@ def sort_scores(scores):
 
 # Verify: Test passes consistently
 ```
+## 4. Model State Explicitly
+
+### Example 1: Fixed Lifecycle Should Use Enums
+
+**User Request:** "Clean up the thread lifecycle for this background worker"
+
+**❌ What LLMs Do (Free-Flowing State Strings)**
+
+```python
+class Worker:
+    def __init__(self):
+        self.state = "idle"
+
+    def start(self):
+        self.state = "starting"
+        # thread startup
+        self.state = "running"
+
+    def stop(self):
+        self.state = "stopping"
+        # shutdown
+        self.state = "stopped"
+
+    def mark_error(self, exc):
+        self.state = "failed"
+        self.last_error = str(exc)
+```
+
+**Problems:**
+- Any typo silently creates a new invalid state.
+- Callers have to remember string literals.
+- Cross-module checks become inconsistent (`"failed"` vs `"error"` vs `"dead"`).
+- Refactors are unsafe because the state machine is not typed.
+
+**✅ What Should Happen (Typed Enum)**
+
+```python
+from enum import Enum
+
+
+class WorkerState(str, Enum):
+    IDLE = "idle"
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+class Worker:
+    def __init__(self):
+        self.state = WorkerState.IDLE
+
+    def start(self):
+        self.state = WorkerState.STARTING
+        # thread startup
+        self.state = WorkerState.RUNNING
+
+    def stop(self):
+        self.state = WorkerState.STOPPING
+        # shutdown
+        self.state = WorkerState.STOPPED
+
+    def mark_error(self, exc):
+        self.state = WorkerState.FAILED
+        self.last_error = str(exc)
+```
 
 ---
 

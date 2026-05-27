@@ -5,7 +5,6 @@ import time
 
 import pika
 import pytest
-from pgwal.events import EXIT
 from pgwal.publishers.rabbitmq import RabbitPublisher
 
 
@@ -162,15 +161,7 @@ def test_rabbit_publisher_run_closes_ioloop(monkeypatch):
 
     monkeypatch.setattr(publisher, 'connect', _fake_connect)
 
-    previous_exit_state = EXIT.is_set()
-    EXIT.set()
-    try:
-        publisher.run()
-    finally:
-        if previous_exit_state:
-            EXIT.set()
-        else:
-            EXIT.clear()
+    publisher.run()
 
     assert loops
     assert loops[0].started is True

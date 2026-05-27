@@ -239,7 +239,7 @@ def _collect_local_methods(
         if not isinstance(statement, ast.FunctionDef):
             continue
         decorators = {ast.unparse(decorator) for decorator in statement.decorator_list}
-        if 'abc.abstractmethod' in decorators:
+        if 'abc.abstractmethod' in decorators or 'property' in decorators:
             continue
         methods.append(
             StubMethod(

@@ -3,6 +3,14 @@
 import json
 import time
 
+import pytest
+
+
+@pytest.fixture(scope='session', autouse=True)
+def db_conn():
+    """Override the global Postgres fixture for broker-only Kafka tests."""
+    yield None
+
 
 def _read_many(consumer, expected: int, timeout: float = 10.0) -> list[str]:
     messages = []

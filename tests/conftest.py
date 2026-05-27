@@ -3,7 +3,6 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from queue import Empty
 from typing import Generator, TYPE_CHECKING
 
 from kafka import KafkaAdminClient, KafkaConsumer
@@ -17,7 +16,6 @@ from pgwal.consumers import WALConsumer
 from pgwal.publishers import ShellPublisher
 from pgwal.publishers.kafka import KafkaPublisher
 from pgwal.publishers.rabbitmq import RabbitPublisher
-from pgwal.events import EXIT
 from pgwal.interface import (
     WALReplicationOpts,
     WALReplicationValues,
@@ -210,14 +208,6 @@ def rabbit_publisher(rabbitmq_settings):
     publisher.queue_name = queue_name
     publisher.routing_key = routing_key
 
-    previous_exit_state = EXIT.is_set()
-    EXIT.set()
-    while True:
-        try:
-            publisher.msg_queue.get_nowait()
-        except Empty:
-            break
-
     def _publish_payload(payload):
         publisher.publish(RabbitPayloadMessage(payload))
 
@@ -234,15 +224,6 @@ def rabbit_publisher(rabbitmq_settings):
     publisher.stop()
     if not publisher.wait_stopped(timeout=10.0):
         raise AssertionError('timed out waiting for RabbitPublisher shutdown')
-    while True:
-        try:
-            publisher.msg_queue.get_nowait()
-        except Empty:
-            break
-    if previous_exit_state:
-        EXIT.set()
-    else:
-        EXIT.clear()
 
 
 @pytest.fixture
@@ -300,14 +281,6 @@ def kafka_consumer(kafka_settings, kafka_topic):
 
 @pytest.fixture
 def kafka_publisher(kafka_settings, kafka_topic):
-    previous_exit_state = EXIT.is_set()
-    EXIT.set()
-    while True:
-        try:
-            KafkaPublisher._MSG_QUEUE.get_nowait()
-        except Empty:
-            break
-
     publisher = KafkaPublisher(
         kafka_topic,
         bootstrap_servers=kafka_settings.bootstrap_servers,
@@ -329,14 +302,5 @@ def kafka_publisher(kafka_settings, kafka_topic):
     yield publisher
 
     publisher.stop()
-    EXIT.clear()
+    publisher.wait_stopped(timeout=10.0)
     time.sleep(publisher._PUBLISH_INTERVAL + 0.2)
-    while True:
-        try:
-            KafkaPublisher._MSG_QUEUE.get_nowait()
-        except Empty:
-            break
-    if previous_exit_state:
-        EXIT.set()
-    else:
-        EXIT.clear()
