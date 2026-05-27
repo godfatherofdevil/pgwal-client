@@ -53,6 +53,12 @@ class PGWAL:
         """Stop all publishers before exiting"""
         for publisher in self.publishers:
             publisher.stop()
+        for publisher in self.publishers:
+            if not publisher.wait_stopped(timeout=10.0):
+                logger.warning(
+                    'Publisher %s did not stop within shutdown timeout',
+                    publisher.__class__.__name__,
+                )
 
     def get_conn(self) -> 'LogicalReplicationConnection':
         """Get a connection from pool"""

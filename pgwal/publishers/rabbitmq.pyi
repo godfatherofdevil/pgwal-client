@@ -1,8 +1,9 @@
 import pika
 import threading
+from ..events import EXIT as EXIT
 from .base import BasePublisher as BasePublisher, MsgQueueMixin as MsgQueueMixin, PublisherMessage as PublisherMessage, ensure_running as ensure_running
-from _typeshed import Incomplete as Incomplete
-from pika.exchange_type import ExchangeType as ExchangeType
+from _typeshed import Incomplete
+from pika.exchange_type import ExchangeType
 from psycopg2.extras import ReplicationMessage
 from queue import SimpleQueue
 from typing import Any
@@ -10,6 +11,32 @@ from typing import Any
 logger: Incomplete
 
 class RabbitPublisher(BasePublisher, MsgQueueMixin):
+    _lock: Incomplete
+    _MSG_QUEUE: Incomplete
+    _PUBLISH_INTERVAL: float
+    _NAME: str
+    _connection: pika.SelectConnection | None
+    _channel: Any
+    _ioloop: Incomplete
+    _deliveries: dict[int, bool] | None
+    _acked: int | None
+    _nacked: int | None
+    _message_number: int | None
+    _stopping: bool
+    _url: str
+    _exchange: str
+    _queue: str
+    _routing_key: str
+    _exchange_type: ExchangeType
+    _ready: Incomplete
+    _stopped: Incomplete
+    def _close_from_ioloop(self) -> None: ...
+    def _request_shutdown(self) -> None: ...
+    def is_running(self) -> bool: ...
+    def set_running(self, value: bool) -> None: ...
+    def _get_thread_lock(self) -> threading.Lock: ...
+    def start_worker(self) -> threading.Thread: ...
+    def _get_message(self) -> Incomplete: ...
     msg_headers: dict[str, object]
     def __init__(self, amqp_url: str, exchange: str, queue: str, routing_key: str, exchange_type: ExchangeType = ...) -> None: ...
     @property
@@ -38,5 +65,6 @@ class RabbitPublisher(BasePublisher, MsgQueueMixin):
     def stop(self) -> None: ...
     def close_channel(self) -> None: ...
     def close_connection(self) -> None: ...
+    def wait_stopped(self, timeout: float | None = None) -> bool: ...
     @ensure_running
     def publish(self, msg: ReplicationMessage) -> None: ...
