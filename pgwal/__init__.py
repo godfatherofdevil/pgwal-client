@@ -3,8 +3,8 @@ Postgres WAL Python client package
 """
 from __future__ import annotations
 
-from .app import PGWAL
-from .consumers import WALConsumer
+from .app import AppState, ConsumerHandle, PGWAL
+from .consumers import ConsumerState, WALConsumer
 from .interface import (
     WALReplicationValues,
     WALReplicationOpts,
@@ -14,6 +14,7 @@ from .publishers import (
     RabbitPublisher,
     ShellPublisher,
 )
+from .publishers.base import PublisherState
 
 
 def int_or_str(value: str) -> int | str:
@@ -30,10 +31,14 @@ VERSION = tuple(map(int_or_str, __version__.split(".")))
 
 __all__ = (
     'PGWAL',
+    'ConsumerHandle',
+    'AppState',
     'WALConsumer',
+    'ConsumerState',
     'WALReplicationValues',
     'WALReplicationOpts',
     'ShellPublisher',
     'RabbitPublisher',
     'KafkaPublisher',
+    'PublisherState',
 )

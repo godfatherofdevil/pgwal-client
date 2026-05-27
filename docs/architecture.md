@@ -21,6 +21,7 @@ Implemented destinations:
 2. WAL decoding uses the Postgres logical replication output plugin: wal2json.
 3. One active consumer is the practical production shape, even though the code can start multiple consumers.
 4. Fan-out happens inside a consumer by iterating configured publishers.
+5. WAL feedback intentionally advances after successful local publisher handoff, not broker confirmation.
 ```
 
 ## System Topology
@@ -30,7 +31,8 @@ Implemented destinations:
                                       |              Application             |
                                       |--------------------------------------|
                                       | PGWAL                                |
-                                      | - owns replication connection pool   |
+                                      | - owns consumer handles              |
+                                      | - owns per-app stop state            |
                                       | - owns worker threads                |
                                       | - owns publisher lifecycle           |
                                       +-------------------+------------------+
@@ -106,7 +108,7 @@ Implemented destinations:
   [3] Logical replication slot exposes WAL stream
        |
        v
-  [4] PGWAL gets a LogicalReplicationConnection from ThreadedConnectionPool
+  [4] PGWAL opens one dedicated LogicalReplicationConnection per consumer thread
        |
        v
   [5] WALConsumer.start_replication(...)
@@ -170,8 +172,9 @@ Implemented destinations:
 | Main thread                                                                       |
 |-----------------------------------------------------------------------------------|
 | app = PGWAL(dsn)                                                                  |
-| app.consume(consumer_a) -> thread_a                                               |
-| app.consume(consumer_b) -> thread_b   # supported structurally, discouraged       |
+| app.consume(consumer_a) -> consumer_handle_a                                      |
+| app.consume(consumer_b) -> consumer_handle_b                                      |
+| app.state is AppState                                                             |
 | app.run()                                                                         |
 +--------------------------------------+--------------------------------------------+
                                        |
@@ -181,6 +184,7 @@ Implemented destinations:
 |-----------------------------------------------------------------------------------|
 | dedicated LogicalReplicationConnection                                            |
 | dedicated replication cursor                                                      |
+| per-consumer stop event + ConsumerState                                           |
 | loop: consume_async(cursor)                                                       |
 +--------------------------------------+--------------------------------------------+
                                        |
@@ -193,6 +197,7 @@ Implemented destinations:
                                   | ShellPublisher   : no worker thread; logs inline                    |
                                   | RabbitPublisher  : tracked worker thread + pika ioloop + queue      |
                                   | KafkaPublisher   : tracked worker thread + poll/sleep loop + queue  |
+                                  | all publishers  : lifecycle tracked with PublisherState             |
                                   +-----------------------------------------------------------------------+
 ```
 
@@ -205,7 +210,7 @@ consume_async(cursor)
     |
     +--> loop
          |
-         +--> EXIT not set? -------- yes ---> stop consumer and break
+         +--> consumer stop requested? --- yes ---> stop consumer and break
          |
          +--> cursor closed? ------- yes ---> return
          |
@@ -341,42 +346,50 @@ User config
 | Kafka broker confirmation      | delegated to KafkaProducer.send(...)                |
 | Retry / redelivery             | broker reconnect exists for RabbitMQ; limited else  |
 | Persistence boundary           | Postgres WAL, then broker-specific durability       |
-| Shutdown control               | shared EXIT threading.Event                         |
+| App lifecycle                  | per-instance AppState + stop_event                  |
+| Consumer lifecycle             | per-instance ConsumerState + stop_event             |
+| Publisher lifecycle            | per-instance PublisherState + stop_event            |
 +--------------------------------------------------------------------------------------+
 ```
 
 ## Failure / Shutdown Flow
 
 ```text
-                    +--------------------+
-                    | KeyboardInterrupt  |
-                    | Exception          |
-                    | EXIT.clear()       |
-                    +---------+----------+
-                              |
-                              v
-                    +---------+----------+
-                    | PGWAL.run() except |
-                    +---------+----------+
-                              |
-          +-------------------+-------------------+
-          |                                       |
-          v                                       v
-+---------+-----------+               +-----------+---------+
-| close_pool()        |               | stop_publishers()   |
-| close DB conns      |               | stop + wait sink    |
-+---------+-----------+               +-----------+---------+
-          |                                       |
-          v                                       v
-+---------+-----------+               +-----------+---------+
-| consumer loops see  |               | publisher loops see |
-| EXIT not set        |               | EXIT not set        |
-+---------+-----------+               +-----------+---------+
-          |                                       |
-          +-------------------+-------------------+
-                              |
-                              v
-                         process exits
+                    +----------------------+
+                    | KeyboardInterrupt    |
+                    | consumer failure     |
+                    | explicit app.stop()  |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------+-----------+
+                    | PGWAL.stop()         |
+                    | app.state=STOPPING   |
+                    +----------+-----------+
+                               |
+          +--------------------+--------------------+
+          |                                         |
+          v                                         v
++---------+-----------+                 +-----------+-----------+
+| stop consumers      |                 | stop_publishers()     |
+| set ConsumerState   |                 | set PublisherState    |
+| stop_event per slot |                 | stop + wait_stopped   |
++---------+-----------+                 +-----------+-----------+
+          |                                         |
+          v                                         v
++---------+-----------+                 +-----------+-----------+
+| consume_async loop  |                 | worker threads exit   |
+| exits and closes    |                 | Kafka/Rabbit cleanup  |
+| its own repl conn   |                 | sets STOPPED/FAILED   |
++---------+-----------+                 +-----------+-----------+
+          |                                         |
+          +--------------------+--------------------+
+                               |
+                               v
+                    +----------+-----------+
+                    | PGWAL.close()        |
+                    | app.state=STOPPED    |
+                    +----------------------+
 ```
 
 ## Practical Deployment Shape
@@ -403,15 +416,15 @@ Scale fan-out at the publisher/destination layer instead.
 ## File Map
 
 ```text
-pgwal/app.py                  -> PGWAL process, pool, thread orchestration
-pgwal/consumers.py            -> replication consumption loop
+pgwal/app.py                  -> PGWAL app lifecycle, ConsumerHandle, AppState
+pgwal/consumers.py            -> replication consumption loop, ConsumerState
 pgwal/interface.py            -> wal2json replication option model
-pgwal/events.py               -> global EXIT event
-pgwal/publishers/base.py      -> publisher lifecycle, worker tracking, queue mixin
+pgwal/publishers/base.py      -> publisher lifecycle, PublisherState, worker tracking, queue mixin
 pgwal/publishers/shell.py     -> local logging sink
 pgwal/publishers/rabbitmq.py  -> RabbitMQ sink + deterministic ioloop shutdown
 pgwal/publishers/kafka.py     -> Kafka sink
 tests/test_consumers.py       -> feedback + cursor loop behavior
 tests/test_rabbitmq_publisher.py
 tests/test_kafka_publisher.py -> sink delivery behavior
+tests/test_thread_model.py    -> lifecycle enums, isolation, queue behavior
 ```

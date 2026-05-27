@@ -7,7 +7,7 @@ from unittest.mock import patch
 from psycopg2.extras import ReplicationCursor
 
 from pgwal import WALConsumer, ShellPublisher
-from pgwal.events import EXIT
+from pgwal.publishers.base import PublishResult
 from tests import ReplicationMessageMock
 
 
@@ -43,15 +43,13 @@ def test_consumer_returns_when_exit_signal(
     wal_consumer, db_replication_cursor, db_conn
 ):
     def _consume_async():
-        while EXIT.is_set():
-            wal_consumer.consume_async(db_replication_cursor)
+        wal_consumer.consume_async(db_replication_cursor)
 
     task = threading.Thread(target=_consume_async)
-    EXIT.set()
     task.start()
     assert task.is_alive()
 
-    EXIT.clear()
+    wal_consumer.stop()
     # This will make the cursor wakeup so that
     # task thread will exit
     create_test_data(db_conn)
@@ -72,6 +70,7 @@ def test__get_cur_timeout_returns_timeout(wal_consumer, db_replication_cursor, d
 
 @patch.object(ShellPublisher, 'publish')
 def test__consume(publish_mock, wal_consumer, db_replication_cursor):
+    publish_mock.return_value = PublishResult(accepted=True)
     msg = ReplicationMessageMock(
         {
             'data_start': 0,

@@ -1,15 +1,25 @@
-from .events import EXIT as EXIT
-from .interface import WALReplicationOpts as WALReplicationOpts
+import threading
 from .publishers.base import BasePublisher as BasePublisher
 from _typeshed import Incomplete
+from enum import Enum
 from psycopg2.extras import ReplicationCursor, ReplicationMessage
 
 logger: Incomplete
 
+class ConsumerState(str, Enum):
+    IDLE = 'idle'
+    STARTING = 'starting'
+    RUNNING = 'running'
+    STOPPING = 'stopping'
+    STOPPED = 'stopped'
+    FAILED = 'failed'
+
 class WALConsumer:
-    _lock: Incomplete
     _STATUS_INTERVAL: float
-    _consuming: bool
+    _stop_event: Incomplete
+    _state: ConsumerState
+    _last_error: str | None
+    def _publish_to_all(self, msg: 'ReplicationMessage') -> bool: ...
     def _consume(self, msg: 'ReplicationMessage') -> None: ...
     def _msg_n_consumed(self, cursor: 'ReplicationCursor') -> bool: ...
     def _get_cur_timeout(self, cursor: 'ReplicationCursor') -> float: ...
@@ -17,10 +27,14 @@ class WALConsumer:
     replication_slot: Incomplete
     replication_opts: Incomplete
     publishers: Incomplete
-    def __init__(self, replication_slot: str, replication_opts: WALReplicationOpts, publishers: list['BasePublisher'] | None = None) -> None: ...
-    def set_consuming(self, value: bool) -> None: ...
+    def __init__(self, replication_slot: str, replication_opts: object, publishers: list['BasePublisher'] | None = None) -> None: ...
     @property
-    def consuming(self) -> bool: ...
+    def state(self) -> ConsumerState: ...
+    def set_state(self, value: ConsumerState) -> None: ...
+    @property
+    def last_error(self) -> str | None: ...
+    @property
+    def stop_event(self) -> threading.Event: ...
     def stop(self) -> None: ...
     @property
     def output_plugin(self) -> str: ...
